@@ -1,0 +1,6 @@
+numpy==1.23.0
+tensorflow==2.9.1
+tensorflow-datasets==4.6.0
+tensorflow-addons==0.17.1
+tensorflow-probability==0.17.0
+seaborn==0.11.2
