@@ -292,7 +292,9 @@ if __name__ == '__main__':
                     epochs=local_epochs,
                 )
 
-                # print(global_weights[0])
+                global_weights = tf.nest.map_structure(lambda a, b: a + (local_examples * b) / total_examples,
+                                                       client_model.get_weights())
+
                 loss, accuracy = client_model.evaluate(test_ds)
 
                 mean_client_loss = mean_client_loss + loss / total_clients
