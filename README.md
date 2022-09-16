@@ -1,6 +1,7 @@
 ## Federated Learning Algorithms with Heterogeneous Data Distributions: An Empirical Evaluation
 
-This repository contains TensorFlow codes to simulate different FL algorithm to tackle non-IID data distributions.
+This repository contains TensorFlow codes to simulate different FL algorithms (FedAvg, FedProx, FedDF, FedGKD) 
+to tackle non-IID data distributions.
 
 ### Data partitioning
 
@@ -13,7 +14,7 @@ while low (e.g., 1.0) values produce a very different amount of examples for eac
 `simulation.py` contains the simulations code for FedAvg, FedProx and FedGKD. Hyperparameters can be choosen by manually modifying the
 `hp` dictionary. A simulation of each combination of hyperparameters will be run.
 Similarly, `simulation_feddf.py` contains the simulations code for FedDF.
-Note: before running the simulation(s) the `partitioned cifar10` must be created using the provided script (see the following).
+Note: before running the simulation(s) the partitioned cifar10 must be created using the provided script (see the following).
 
 #### Creating a virtual environment with venv
 `python3 -m venv fd_env`

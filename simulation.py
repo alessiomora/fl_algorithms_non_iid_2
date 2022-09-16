@@ -21,7 +21,7 @@ import tensorflow_datasets as tfds
 
 # import datetime
 
-PATH = "exp_results_batch_norm_v2"
+PATH = "exp_results"
 
 def get_all_hp_combinations(hp):
     '''Turns a dict of lists into a list of dicts'''
@@ -124,22 +124,20 @@ if __name__ == '__main__':
 
     # Building a dictionary of hyperparameters
     hp = {}
-    # hp["algorithm"] = ["fedavg", "fedprox"]
-    hp["algorithm"] = ["fedprox"]
-    # hp["algorithm"] = ["feddistill_plus"]
-    # hp["algorithm"] = ["feddistill"]
+
+    hp["algorithm"] = ["fedavg", "fedprox", "fedgkd"]
     hp["reinit_classifier"] = [False]
     hp["batch_size"] = [32]
     hp["E"] = [10] # local_epochs
     hp["C"] = [8] # n clients
-    hp["rounds"] = [100]
+    hp["rounds"] = [10]
     hp["alpha"] = [100.0]
 
     hp["norm"] = ["batch"]
     hp["dataset"] = ["cifar10"]
 
     hp["gamma"] = [0.0001]
-    hp["t"] = [0.1] #temperature
+    # hp["t"] = [0.1] #temperature
     hp["M"] = [1] # only for fedgdk
     hp["seed"] = [2021, 2020] # seed for client selection
 
@@ -163,7 +161,7 @@ if __name__ == '__main__':
         load_stl10_from_file = False
         random_seed = setting["seed"]
         dataset = setting["dataset"]
-        temperature = setting["t"]
+        # temperature = setting["t"]
 
         if algorithm == "fedprox":
             mu = setting["gamma"]
@@ -175,8 +173,7 @@ if __name__ == '__main__':
             num_classes = 100
 
         # Some log files for metrics and debug info
-        write_intro_logs(["server_evaluation", "client_local_training_history",
-                          "average_client_evaluation_after_local_training"], setting, algorithm)
+        write_intro_logs(["server_evaluation"], setting, algorithm)
 
         server_model = res.create_resnet18(input_shape=(32, 32, 3), num_classes=num_classes, norm=norm)
 
@@ -200,6 +197,7 @@ if __name__ == '__main__':
             test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test)).map(element_norm_fn).batch(
                 test_batch_size)
 
+        # NOT TESTED WITH CIFAR100
         if dataset == "cifar100":
             cifar100_tfds = tfds.load("cifar100")
             test_ds = cifar100_tfds["test"]
@@ -207,11 +205,8 @@ if __name__ == '__main__':
 
         np.random.seed(random_seed)
         # tensorboard
-        # logs/dataset_alpha/algorithm/specific_parameters
-        # C8_E10_batch_lambda0.1_temperature1.0 _M1
+        # logs/dataset_alpha/algorithm/specific_parameters,seed
         logdir = os.path.join(PATH, "logs", dataset + "_" + str(round(alpha, 2)), algorithm, encode_hyperparameter_in_string(setting))
-        local_train_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "local_train"))
-        local_test_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "local_test"))
         global_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "global_test"))
 
         history = server_model.evaluate(test_ds, return_dict=True)
@@ -239,9 +234,6 @@ if __name__ == '__main__':
                                                    global_weights,
                                                    global_weights)
 
-            if algorithm == "feddistill_plus" or algorithm == "feddistill":
-                global_mean_per_label_soft_labels = tf.zeros([10, 10], tf.float32)
-
             selected_client_examples = data_utility.load_selected_clients_statistics(sampled_clients, alpha, dataset)
             print("Total examples ", np.sum(selected_client_examples))
             print("Local examples selected clients ", selected_client_examples)
@@ -262,8 +254,6 @@ if __name__ == '__main__':
                     alpha=alpha)
 
                 resnet18_model = res.create_resnet18(input_shape=(32, 32, 3), num_classes=num_classes, norm=norm)
-                if algorithm != "feddistill": # fed_distill does not exchange weights
-                    resnet18_model.set_weights(aggregated_weights)
 
                 if algorithm == "fedavg":
                     client_model = resnet18_model
@@ -287,22 +277,6 @@ if __name__ == '__main__':
                                          metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
                                          kd_loss=tf.keras.losses.KLDivergence())
 
-                if algorithm == "fedntd":
-                    client_model = ntd.FedNTDModel(resnet18_model)
-                    client_model.compile(optimizer=keras.optimizers.Adam(),
-                                         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-                                         metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
-                                         kd_loss=tf.keras.losses.KLDivergence())
-
-                if algorithm == "feddistill_plus" or algorithm == "feddistill":
-                    client_model = distill_plus.FedDistillPlusModel(resnet18_model)
-                    client_model.compile(optimizer=keras.optimizers.Adam(),
-                                         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-                                         metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
-                                         kd_loss=tf.keras.losses.KLDivergence(),
-                                         gamma=0.0 if rnd == 1 else 0.1,
-                                         global_mean_soft_labels=global_mean_per_label_soft_labels)
-
                 # client_model.set_weights(aggregated_weights)
 
                 if algorithm == "fedgkd":
@@ -311,51 +285,18 @@ if __name__ == '__main__':
                     training_dataset = tf.data.Dataset.zip((training_dataset,
                                                             teacher_logits_ds))
 
-                if algorithm == "fedntd":
-                    teacher_logits = server_model.predict(training_dataset)
-                    teacher_logits_ds = tf.data.Dataset.from_tensor_slices(teacher_logits).batch(local_batch_size)
-                    training_dataset = tf.data.Dataset.zip((training_dataset,
-                                                            teacher_logits_ds))
 
                 history = client_model.fit(
                     training_dataset,
                     batch_size=local_batch_size,
                     epochs=local_epochs,
                 )
-                # log on tensorboard
-                # print(history.history["loss"])
-                # with local_train_summary_writer.as_default():
-                #     tf.summary.scalar('loss', history.history["loss"][len(history.history["loss"])-1], step=rnd)
-                #     tf.summary.scalar('accuracy', history.history["accuracy"][len(history.history["loss"])-1], step=rnd)
-
-                write_logs("client_local_training_history", history.history, algorithm, client=c)
-
-                if algorithm != "feddistill":
-                    global_weights = tf.nest.map_structure(lambda a, b: a + (local_examples*b) / total_examples,
-                                                           global_weights,
-                                                           client_model.model.get_weights() if algorithm not in ["fedavg", "fedprox"] else
-                                                           client_model.get_weights())
 
                 # print(global_weights[0])
                 loss, accuracy = client_model.evaluate(test_ds)
-                with local_test_summary_writer.as_default():
-                    tf.summary.scalar('loss', loss, step=rnd)
-                    tf.summary.scalar('accuracy', accuracy, step=rnd)
 
                 mean_client_loss = mean_client_loss + loss / total_clients
                 mean_client_accuracy = mean_client_accuracy + accuracy / total_clients
-
-                if algorithm == "feddistill_plus" or algorithm == "feddistill":
-                    # print("label_count ", client_model.get_label_count())
-                    # print("per_label_soft_labels ", client_model.get_per_label_soft_label())
-                    local_mean_per_label_soft_labels = tf.math.divide_no_nan(client_model.get_per_label_soft_label(),
-                                                                             tf.transpose(tf.expand_dims(
-                                                                                 client_model.get_label_count(),
-                                                                                 axis=0))
-                                                                             )
-                    # print("mean_per_label_soft_labels", local_mean_per_label_soft_labels)
-                    global_mean_per_label_soft_labels = global_mean_per_label_soft_labels + \
-                                                        local_mean_per_label_soft_labels / total_clients
 
             # Server evaluation
             server_model.set_weights(global_weights)
@@ -379,8 +320,6 @@ if __name__ == '__main__':
 
             print(f"[info] mean client loss {mean_client_loss}")
             print(f"[info] mean client accuracy {mean_client_accuracy}")
-            write_logs("average_client_evaluation_after_local_training",
-                       "accuracy " + str(mean_client_accuracy) + " loss " + str(mean_client_loss), algorithm)
 
             print("[Server] Evaluation - Round: ", rnd)
             history = server_model.evaluate(test_ds, return_dict=True)

@@ -17,7 +17,7 @@ from distiller import Distiller
 import itertools as it
 import tensorflow_datasets as tfds
 
-PATH = "exp_results_batch_norm_v2"
+PATH = "exp_results"
 
 def get_all_hp_combinations(hp):
     '''Turns a dict of lists into a list of dicts'''

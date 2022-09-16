@@ -44,14 +44,14 @@ def remove_list_from_list(orig_list, to_remove):
 
 if __name__ == '__main__':
     alphas = [1.0] # alpha >= 100.0 generates a homogeneous distrib.
-    datasets = ["cifar100"] # dataset = ["cifar10", "cifar100"]
+    datasets = ["cifar10"] # dataset = ["cifar10", "cifar100"]
     num_of_clients = 20
 
     print("Generating dirichlet partitions..")
 
     for dataset in datasets:
         for alpha in alphas:
-            print("Generating alpha = "+ alpha +" partitions..")
+            print("Generating alpha = "+ str(alpha) +" partitions..")
             # preparing folder
             folder = dataset + "_dirichlet"
             exist = os.path.exists(folder)
