@@ -1,12 +1,4 @@
-"""This is a minimal implementation of Federated Distillation based on the papers:
-https://arxiv.org/abs/2008.06180
-https://ieeexplore.ieee.org/abstract/document/9435947
-"""
 import os
-
-# This is for explicitly use GPU recognized as device 0
-# Remove this line if you dont need it
-os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 import data_utility
 import random
 import tensorflow as tf
