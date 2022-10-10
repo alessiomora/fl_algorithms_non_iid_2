@@ -1,3 +1,9 @@
+"""This is a minimal implementation of Federated Distillation based on the papers:
+https://arxiv.org/abs/2008.06180
+https://ieeexplore.ieee.org/abstract/document/9435947
+"""
+# tensorboard dev upload --logdir /home/amora/pycharm_projects/fed_dist_simulated/exp_results/logs --name "Cifar10 8 clients" --description "Comparison of algorithms."
+# https://tensorboard.dev/experiment/ULzAiK7SQWCE4LCox9tnUA/#scalars&regexInput=0.1%2Fglo
 import os
 import data_utility
 import tensorflow as tf
@@ -9,9 +15,16 @@ import FedGKDModel as gkt
 import FedProxModel as prox
 import tensorflow_datasets as tfds
 
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(
+        device=gpu, enable=True
+    )
+
 # import datetime
 
-PATH = "exp_results"
+PATH = "cifar100_results"
+
 
 def get_all_hp_combinations(hp):
     '''Turns a dict of lists into a list of dicts'''
@@ -68,6 +81,7 @@ def element_norm_fn(image, label):
                                                          np.square(0.2010)])
     return norm_layer(tf.cast(image, tf.float32) / 255.0), label
 
+
 def element_norm_fn_cifar100(element):
     """Utility function to normalize input images."""
     norm_layer = tf.keras.layers.Normalization(mean=[0.4914, 0.4822, 0.4465],
@@ -96,11 +110,11 @@ def encode_hyperparameter_in_string(s):
     hyperparameters = ["E", "C", "gamma", "seed"]
     if s["algorithm"] == "fedavg":
         hyperparameters = ["E", "C", "seed"]
-        
+
     encoded = ""
 
     for h in hyperparameters:
-        if h =="seed":
+        if h == "seed":
             encoded = encoded + "," + h + str(round(s[h], 3))
         else:
             if encoded == "":
@@ -115,21 +129,21 @@ if __name__ == '__main__':
     # Building a dictionary of hyperparameters
     hp = {}
 
-    hp["algorithm"] = ["fedavg", "fedprox", "fedgkd"]
+    hp["algorithm"] = ["fedavg"]
     hp["reinit_classifier"] = [False]
     hp["batch_size"] = [32]
-    hp["E"] = [10] # local_epochs
-    hp["C"] = [8] # n clients
-    hp["rounds"] = [10]
-    hp["alpha"] = [100.0]
+    hp["E"] = [10]  # local_epochs
+    hp["C"] = [8]  # n clients
+    hp["rounds"] = [300]
+    hp["alpha"] = [0.1]
 
-    hp["norm"] = ["batch"]
-    hp["dataset"] = ["cifar10"]
+    hp["norm"] = ["group"]
+    hp["dataset"] = ["cifar100"]
 
     hp["gamma"] = [0.0001]
     # hp["t"] = [0.1] #temperature
-    hp["M"] = [1] # only for fedgdk
-    hp["seed"] = [2021, 2020] # seed for client selection
+    hp["M"] = [1]  # only for fedgdk
+    hp["seed"] = [2021, 2020]  # seed for client selection
 
     # Creating a list of dictionaries
     # each one for a combination of hp
@@ -140,7 +154,7 @@ if __name__ == '__main__':
         print("simulation start " + str(setting))
         total_rounds = setting["rounds"]
         total_clients = setting["C"]
-        local_epochs = setting["E"] # local_epochs
+        local_epochs = setting["E"]  # local_epochs
         local_batch_size = setting["batch_size"]
         test_batch_size = 256
         reinit_classifier = setting["reinit_classifier"]
@@ -151,7 +165,6 @@ if __name__ == '__main__':
         load_stl10_from_file = False
         random_seed = setting["seed"]
         dataset = setting["dataset"]
-        # temperature = setting["t"]
 
         if algorithm == "fedprox":
             mu = setting["gamma"]
@@ -161,6 +174,8 @@ if __name__ == '__main__':
         num_classes = 10
         if dataset == "cifar100":
             num_classes = 100
+
+        lr_client = 10 ** (-0.5)
 
         # Some log files for metrics and debug info
         write_intro_logs(["server_evaluation"], setting, algorithm)
@@ -175,7 +190,7 @@ if __name__ == '__main__':
         if algorithm == "fedgkd":
             historical_ensemble_model = res.create_resnet18(input_shape=(32, 32, 3), num_classes=num_classes, norm=norm)
             historical_ensemble_model.compile(
-                optimizer=keras.optimizers.Adam(),
+                optimizer=keras.optimizers.SGD(learning_rate=lr_client) if dataset == 'cifar100' else keras.optimizers.Adam(),
                 loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                 metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')]
             )
@@ -196,7 +211,8 @@ if __name__ == '__main__':
         np.random.seed(random_seed)
         # tensorboard
         # logs/dataset_alpha/algorithm/specific_parameters,seed
-        logdir = os.path.join(PATH, "logs", dataset + "_" + str(round(alpha, 2)), algorithm, encode_hyperparameter_in_string(setting))
+        logdir = os.path.join(PATH, "logs", dataset + "_" + str(round(alpha, 2)), algorithm,
+                              encode_hyperparameter_in_string(setting))
         global_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "global_test"))
 
         history = server_model.evaluate(test_ds, return_dict=True)
@@ -244,17 +260,18 @@ if __name__ == '__main__':
                     alpha=alpha)
 
                 resnet18_model = res.create_resnet18(input_shape=(32, 32, 3), num_classes=num_classes, norm=norm)
+                resnet18_model.set_weights(aggregated_weights)
 
                 if algorithm == "fedavg":
                     client_model = resnet18_model
-                    client_model.compile(optimizer=keras.optimizers.Adam(),
+                    client_model.compile(optimizer=keras.optimizers.SGD(learning_rate=lr_client) if dataset == 'cifar100' else keras.optimizers.Adam(),
                                          loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                                          metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
                                          )
 
                 if algorithm == "fedprox":
                     client_model = prox.FedProxModel(resnet18_model)
-                    client_model.compile(optimizer=keras.optimizers.Adam(),
+                    client_model.compile(optimizer=keras.optimizers.SGD(learning_rate=lr_client) if dataset == 'cifar100' else keras.optimizers.Adam(),
                                          loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                                          metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
                                          initial_weights=aggregated_weights,
@@ -262,7 +279,7 @@ if __name__ == '__main__':
 
                 if algorithm == "fedgkd":
                     client_model = gkt.FedGKDModel(resnet18_model)
-                    client_model.compile(optimizer=keras.optimizers.Adam(),
+                    client_model.compile(optimizer=keras.optimizers.SGD(learning_rate=lr_client) if dataset == 'cifar100' else keras.optimizers.Adam(),
                                          loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                                          metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
                                          kd_loss=tf.keras.losses.KLDivergence())
@@ -275,7 +292,6 @@ if __name__ == '__main__':
                     training_dataset = tf.data.Dataset.zip((training_dataset,
                                                             teacher_logits_ds))
 
-
                 history = client_model.fit(
                     training_dataset,
                     batch_size=local_batch_size,
@@ -283,8 +299,11 @@ if __name__ == '__main__':
                 )
 
                 global_weights = tf.nest.map_structure(lambda a, b: a + (local_examples * b) / total_examples,
+                                                       global_weights,
+                                                       client_model.model.get_weights() if algorithm not in ["fedavg",
+                                                                                                             "fedprox"] else
                                                        client_model.get_weights())
-
+                # print(global_weights[0])
                 loss, accuracy = client_model.evaluate(test_ds)
 
                 mean_client_loss = mean_client_loss + loss / total_clients
