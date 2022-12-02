@@ -2,6 +2,7 @@ import tensorflow as tf
 
 
 class FedProxModel(tf.keras.Model):
+    """ FedProx implementation from the paper https://arxiv.org/abs/1812.06127 """
 
     def __init__(self, model):
         super(FedProxModel, self).__init__()

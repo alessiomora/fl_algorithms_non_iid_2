@@ -23,7 +23,7 @@ import tensorflow_addons.layers.normalizations as tfa_norms
 
 BATCH_NORM_DECAY = 0.997
 BATCH_NORM_EPSILON = 1e-5
-L2_WEIGHT_DECAY = 1e-4
+L2_WEIGHT_DECAY = 1e-5
 
 
 def _norm_relu(input_tensor, norm='group'):
@@ -419,7 +419,7 @@ def create_resnet8(input_shape,
                     num_classes,
                     norm='group',
                     seed: Optional[int] = None):
-    """ResNet with 18 layers and basic residual blocks."""
+    """ResNet with 8 layers and basic residual blocks."""
     return create_resnet(
         input_shape,
         num_classes,

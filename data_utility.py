@@ -12,12 +12,12 @@ def remove_list_from_list(orig_list, to_remove):
     return new_list
 
 def load_selected_clients_statistics(selected_clients, alpha, dataset):
-    path = os.path.join(dataset+"_dirichlet", str(round(alpha, 2)), "distribution.npy")
+    path = os.path.join(dataset+"_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
     smpls_loaded = np.load(path)
-    # print(smpls_loaded)
-    local_examples = np.sum(smpls_loaded, axis=1) #20
-    # print(local_examples)
-    return local_examples[selected_clients.tolist()]
+    print(smpls_loaded[selected_clients])
+    local_examples_all_clients = np.sum(smpls_loaded, axis=1)
+    print(local_examples_all_clients)
+    return local_examples_all_clients[selected_clients.tolist()]
 
 def load_stl10_dataset_from_files(num_examples, seed=None):
     """Loads the stl10 dataset from file. Then take the first num_examples examples
@@ -61,26 +61,79 @@ def load_stl10_dataset(num_examples, seed=None):
     # print(img)
     return stl_resized
 
-def load_client_datasets_from_files(dataset, sampled_client, batch_size, alpha=100.0):
-    """Loads a random client partition the cifar10 dataset from file.
+def load_client_datasets_from_files(dataset, sampled_client, batch_size, alpha=100.0, split="train", seed=None):
+    """Loads a sampled client partition of the dataset.
         Examples are preprocessed via normalization layer.
         Returns a batched dataset."""
 
-    path = os.path.join(dataset+"_dirichlet", str(round(alpha, 2)), "train")
+    # transform images
+    rotate = tf.keras.layers.RandomRotation(0.06, seed=seed)
+    flip = tf.keras.layers.RandomFlip(mode="horizontal", seed=seed)
+    crop = tf.keras.layers.RandomCrop(height=28, width=28, seed=seed)
 
-    loaded_ds_train = tf.data.experimental.load(
+    rotate_flip_crop = tf.keras.Sequential([
+        rotate,
+        crop,
+        flip,
+    ])
+
+    def transform_data(image, label):
+        return rotate_flip_crop(image), label
+    # ----------------------------------------
+
+    # path = os.path.join(dataset+"_dirichlet", str(round(alpha, 2)), split)
+    path = os.path.join(dataset+"_dirichlet_train_and_test", str(round(alpha, 2)), split)
+
+    loaded_ds = tf.data.experimental.load(
         path=os.path.join(path, str(sampled_client)), element_spec=None, compression=None, reader_func=None
     )
 
-    def element_fn_norm(image, label):
-        norm_layer = tf.keras.layers.Normalization(mean=[0.4914, 0.4822, 0.4465],
-                                                   variance=[np.square(0.2023),
-                                                             np.square(0.1994),
-                                                             np.square(0.2010)])
-        return norm_layer(tf.cast(image, tf.float32) / 255.0), label
+    if dataset in ["cifar10"]:
+        def element_fn_norm_cifar10(image, label):
+            # norm_layer = tf.keras.layers.Normalization(mean=[0.4914, 0.4822, 0.4465],
+            #                                            variance=[np.square(0.2023),
+            #                                                      np.square(0.1994),
+            #                                                      np.square(0.2010)])
+            # return norm_layer(tf.cast(image, tf.float32) / 255.0), label
+            norm_layer = tf.keras.layers.Normalization(mean=[0.4914, 0.4822, 0.4465],
+                                                       variance=[np.square(0.2470),
+                                                                 np.square(0.2435),
+                                                                 np.square(0.2616)])
+            return norm_layer(tf.cast(image, tf.float32) / 255.0), label
+        if split == "test":
+            return loaded_ds.map(element_fn_norm_cifar10).batch(
+                batch_size, drop_remainder=False)
+        return loaded_ds.map(element_fn_norm_cifar10).shuffle(buffer_size=1024, seed=seed).batch(
+            batch_size, drop_remainder=False)
+    elif dataset in ["cifar100"]:
+        def element_fn_norm_cifar100(image, label):
+            # norm_layer = tf.keras.layers.Normalization(mean=[0.4914, 0.4822, 0.4465],
+            #                                            variance=[np.square(0.2023),
+            #                                                      np.square(0.1994),
+            #                                                      np.square(0.2010)])
+            # return norm_layer(tf.cast(image, tf.float32) / 255.0), label
+            norm_layer = tf.keras.layers.Normalization(mean=[0.5071, 0.4865, 0.4409],
+                                                       variance=[np.square(0.2673),
+                                                                 np.square(0.2564),
+                                                                 np.square(0.2762)])
+            return norm_layer(tf.cast(image, tf.float32) / 255.0), label
 
-    return loaded_ds_train.map(element_fn_norm).shuffle(1024).batch(
-        batch_size, drop_remainder=False)
+        if split == "test":
+            return loaded_ds.map(element_fn_norm_cifar100).batch(
+                batch_size, drop_remainder=False)
+        return loaded_ds.map(element_fn_norm_cifar100).shuffle(buffer_size=1024, seed=seed).batch(
+            batch_size, drop_remainder=False)
+    else:
+        def element_norm_fn_emnist(image, label):
+            """Utility function to normalize input images."""
+            return tf.cast(image, tf.float32) / 255.0, label
+        if split == "test":
+            return loaded_ds.map(element_norm_fn_emnist).batch(
+                batch_size, drop_remainder=False)
+
+        return loaded_ds.map(element_norm_fn_emnist).shuffle(buffer_size=1024, seed=seed).batch(
+            batch_size, drop_remainder=False)
+
 
 def load_client_cifar10_datasets_from_files(sampled_client, batch_size, alpha=100.0):
     """Loads a random client partition the cifar10 dataset from file.

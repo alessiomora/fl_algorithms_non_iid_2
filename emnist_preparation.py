@@ -1,3 +1,9 @@
+import tensorflow as tf
+import tensorflow_datasets as tfds
+import numpy as np
+import sys
+
+
 """ This script partions the CIFAR10 dataset in a federated fashion.
 The level of non-iidness is defined via the alpha parameter (alpha in the paper below as well)
 for a dirichlet distribution, and rules the distribution of examples per label on clients.
@@ -26,6 +32,8 @@ def generate_dirichlet_samples(num_of_classes, alpha, num_of_clients,
         int_samples_transpose = tf.transpose(int_samples, [1, 0])
         # print("reduce_sum", tf.reduce_sum(int_samples_transpose, axis=1))
         correctly_generated = tf.reduce_min(tf.reduce_sum(int_samples_transpose, axis=1))
+        print(correctly_generated)
+        print(tf.reduce_sum(int_samples_transpose, axis=1))
         if tf.cast(correctly_generated, tf.float32) != tf.constant(0.0, tf.float32):
             break
         print("Generated some clients without any examples. Retrying..")
@@ -43,8 +51,28 @@ def remove_list_from_list(orig_list, to_remove):
 
 
 if __name__ == '__main__':
-    alphas = [0.3] # alpha >= 100.0 generates a homogeneous distrib.
-    datasets = ["cifar10"] # dataset = ["cifar10", "cifar100"]
+    ds = tfds.load(name="emnist/balanced", split="train")
+
+    ds_numpy = tfds.as_numpy(ds)  # Convert `tf.data.Dataset` to Python generator
+
+    x_train_list = []
+    y_train_list = []
+    for ex in ds_numpy:
+        # `{'image': np.array(shape=(28, 28, 1)), 'labels': np.array(shape=())}`
+        x_train_list.append(ex['image'])
+        y_train_list.append(ex['label'])
+
+    print(len(x_train_list))
+    print(len(y_train_list))
+    x_train = np.stack(x_train_list, axis=0)
+    y_train = np.stack(y_train_list, axis=0)
+    print(x_train.shape)
+    print(y_train.shape)
+    print("max label", np.max(y_train)) # should be 47
+
+
+    alphas = [0.05] # alpha >= 100.0 generates a homogeneous distrib.
+    datasets = ["emnist"]
     num_of_clients = 100
 
     print("Generating dirichlet partitions..")
@@ -68,16 +96,17 @@ if __name__ == '__main__':
             else:
                 shutil.rmtree(folder_path, ignore_errors=True)
 
-            num_of_classes = 10 if dataset == "cifar10" else 100
+            # 112,800
+            num_of_classes = 47
             smpls = generate_dirichlet_samples(num_of_classes=num_of_classes, alpha=alpha,
                                                num_of_clients=num_of_clients,
-                                               num_of_examples_per_label=5000 if dataset == "cifar10" else 500)
+                                               num_of_examples_per_label=2400)
             # tf.print(smpls, summarize=-1)
 
             # print(tf.reduce_sum(smpls))
             # Loading the cifar10 dataset -- training split
-            (x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data() if dataset == "cifar10" \
-                else tf.keras.datasets.cifar100.load_data()
+            # (x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data() if dataset == "cifar10" \
+            #     else tf.keras.datasets.cifar100.load_data()
 
             indexes_of_labels = list([list([]) for _ in range(0, num_of_classes)])
 
@@ -98,6 +127,8 @@ if __name__ == '__main__':
                         remained = len(indexes_of_labels[label])
                         extracted_1 = np.random.choice(indexes_of_labels[label], remained, replace=False)
                         indexes_of_labels[label] = indexes_of_labels_backup[label]
+                        # print("num_of_examples_per_label ", num_of_examples_per_label)
+                        # print("remained ", remained)
                         extracted_2 = np.random.choice(indexes_of_labels[label], num_of_examples_per_label - remained,
                                                        replace=False)
                         extracted = np.concatenate((extracted_1, extracted_2), axis=0)
@@ -137,5 +168,8 @@ if __name__ == '__main__':
             path = os.path.join(folder_path, "distribution.npy")
             np.save(path, smpls.numpy())
             smpls_loaded = np.load(path)
-            print(smpls_loaded)
-            print("reduce sum ", tf.reduce_sum(smpls_loaded))
+            np.set_printoptions(threshold=sys.maxsize)
+            tf.print(smpls_loaded, summarize=-1)
+
+# (x_train, y_train), (x_test, y_test) =tf.keras.datasets.cifar10.load_data()
+# print(x_train.shape)
