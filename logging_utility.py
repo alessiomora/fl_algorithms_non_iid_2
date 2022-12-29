@@ -47,7 +47,7 @@ def encode_general_hyperparameter_in_string(s):
     for h in s.keys():
         if h not in ["algorithm", 'reinit_classifier', 'batch_size', 'rounds', 'dataset', "alpha", "seed",
                     "architecture", "total_clients", "E", "C",
-                     "mu", "gamma", "lambda1_lambda2_", "beta", "M",
+                     "mu", "gamma", "lambda1_lambda2_", "beta", "M", "alpha_dyn",
                      "aggregation", "distill_batch_size", "max_distill_epochs_server",
                      "max_distill_epochs_clients", "distill_examples"]:
             if encoded == "":
@@ -71,7 +71,7 @@ def encode_specific_hyperparameter_in_string(s):
     encoded = ""
 
     for h in s.keys():
-        if h in ["beta", "mu", "gamma", "lambda1_lambda2_", "M"]:
+        if h in ["beta", "mu", "gamma", "lambda1_lambda2_", "M", "alpha_dyn"]:
             if encoded == "":
                 if not isinstance(s[h], str) and not isinstance(s[h], list):
                     encoded = encoded + h + str(round(s[h], 5))

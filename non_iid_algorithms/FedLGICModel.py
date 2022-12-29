@@ -39,7 +39,7 @@ class FedLGICModel(tf.keras.Model):
             # usual cross-entropy
             ce_loss = self.compiled_loss(y, local_log_probs, regularization_losses=self.losses)
             ## Compute loss from hybrid branches
-            for it in range(num_blocks-1):
+            for it in range(num_blocks):
                 c_l = self.model(global_features[it], return_feature=False, level=it+1)
                 cl_loss = self.kd_loss(global_features[it + 1], c_l)
                 correction_losses.append(cl_loss)

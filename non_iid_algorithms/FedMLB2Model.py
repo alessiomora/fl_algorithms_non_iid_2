@@ -16,6 +16,7 @@ class FedMLB2Model(tf.keras.Model):
         self.kd_loss = kd_loss
         self.lambda_1 = lambda_1
         self.lambda_2 = lambda_2
+        self.cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
 
     def train_step(self, data):
         # Unpack the data. Its structure depends on your model and
@@ -27,35 +28,43 @@ class FedMLB2Model(tf.keras.Model):
 
             local_features = out_of_local[:-1]
 
-            log_probs = out_of_local[-1]
+            logits = out_of_local[-1]
 
             ce_branch = []
             kl_branch = []
             num_branch = len(local_features)
 
-            ce_loss = self.compiled_loss(y, log_probs, regularization_losses=self.losses)
+            ce_loss = self.compiled_loss(y, logits, regularization_losses=self.model.losses)
+
             ## Compute loss from hybrid branches
             for it in range(num_branch):
                 # tf.print("it ", it)
-                this_log_prob = self.global_model(local_features[it], level=it + 1)
-                this_ce = self.compiled_loss(y, this_log_prob)
+                this_logits = self.global_model(local_features[it], level=it + 1)
+                this_ce = self.cross_entropy(y, this_logits)
                 # kd_loss(y_true, y_pred)
                 # this_kl = self.kd_loss(tf.nn.softmax(log_probs, axis=1), tf.nn.softmax(this_log_prob, axis=1))
-                this_kl = self.kd_loss(tf.nn.softmax(this_log_prob, axis=1), tf.nn.softmax(log_probs, axis=1))
+                # this_kl = self.kd_loss(tf.nn.softmax(this_logits), tf.nn.softmax(logits))
+                this_kl = self.kd_loss(tf.nn.softmax(this_logits), tf.nn.softmax(logits))
+                # tf.print("\nthis_ce", this_ce)
                 ce_branch.append(this_ce)
                 kl_branch.append(this_kl)
 
             # tf.print("shape ", tf.stack(this_ce))
             ce_hybrid_loss = tf.reduce_mean(tf.stack(ce_branch))
             kd_loss = tf.reduce_mean(tf.stack(kl_branch))
+            # tf.print("ce_loss ", ce_loss)
+            # tf.print("\nhere")
+            # tf.print("\nkd_loss ", kd_loss, "ce_hybrid ", ce_hybrid_loss)
             fedmlb_loss = ce_loss + self.lambda_1 * ce_hybrid_loss + self.lambda_2 * kd_loss
+            # tf.print("FEDMLBLOSS ", fedmlb_loss)
+            # tf.print("FEDMLBLOSS ", fedmlb_loss)
 
         trainable_vars = self.model.trainable_variables
         gradients = tape.gradient(fedmlb_loss, trainable_vars)
         # Update weights
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         # Update metrics (includes the metric that tracks the loss)
-        self.compiled_metrics.update_state(y, log_probs)
+        self.compiled_metrics.update_state(y, logits)
 
         return {m.name: m.result() for m in self.metrics}
 
@@ -63,10 +72,13 @@ class FedMLB2Model(tf.keras.Model):
         x, y = data
 
         y_pred = self.model(x)  # Forward pass
-        self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+        self.compiled_loss(y, y_pred, regularization_losses=self.model.losses)
         self.compiled_metrics.update_state(y, y_pred)
         # self.compiled_metrics
         return {m.name: m.result() for m in self.metrics}
 
     def get_weights(self):
         return self.model.get_weights()
+
+    def get_global_weights(self):
+        return self.global_model.get_weights()

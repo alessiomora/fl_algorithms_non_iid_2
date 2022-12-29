@@ -37,7 +37,7 @@ class FedProxModel(tf.keras.Model):
 
             # Compute the loss value
             # (the loss function is configured in `compile()`)
-            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+            loss = self.compiled_loss(y, y_pred, regularization_losses=self.model.losses)
             prox_term = (self.mu / 2) * difference_model_norm_2_square(
                 self.model.weights, self.initial_weights)
             fedprox_loss = loss + prox_term
@@ -59,7 +59,7 @@ class FedProxModel(tf.keras.Model):
         x, y = data
 
         y_pred = self.model(x, training=False)  # Forward pass
-        self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+        self.compiled_loss(y, y_pred, regularization_losses=self.model.losses)
         self.compiled_metrics.update_state(y, y_pred)
         # self.compiled_metrics
         return {m.name: m.result() for m in self.metrics}

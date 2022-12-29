@@ -10,7 +10,7 @@ from tensorflow import keras
 # import residual_model as res
 # import residual_model as res
 import residual_model_custom as res
-from non_iid_algorithms.FedGKDModel import FedGKDModel
+from non_iid_algorithms.FedGKD2Model import FedGKDModel
 from non_iid_algorithms.FedNTDModel import FedNTDModel
 from non_iid_algorithms.FedProxModel import FedProxModel
 from non_iid_algorithms.FedLGICModel import FedLGICModel

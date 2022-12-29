@@ -5,10 +5,9 @@ import numpy as np
 class FedNTDModel(tf.keras.Model):
     """ FedNTD implementation from the paper https://arxiv.org/abs/2106.03097 """
 
-    def __init__(self, model, global_model):
+    def __init__(self, model):
         super(FedNTDModel, self).__init__()
         self.model = model
-        self.global_model = global_model
 
     def compile(self, optimizer, loss, metrics, kd_loss, temperature=1.0, beta=0.3):
         super(FedNTDModel, self).compile(optimizer=optimizer, loss=loss, metrics=metrics)
@@ -19,8 +18,8 @@ class FedNTDModel(tf.keras.Model):
     def train_step(self, data):
         # Unpack the data. Its structure depends on your model and
         # on what you pass to `fit()`.
-        x, y = data
-        z = self.global_model(x, training=False)
+        xy, z = data
+        x, y = xy
 
         # shape = tf.shape(tf.add(z, 1))
         # tf.print(shape)
@@ -76,14 +75,14 @@ class FedNTDModel(tf.keras.Model):
 
             # Compute the loss value
             # (the loss function is configured in `compile()`)
-            ce_loss = self.compiled_loss(y, y_pred, regularization_losses=self.model.losses)
+            ce_loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
             # remove elements corresponding to true classe
             kd_loss = self.kd_loss(tf.nn.softmax(y_pred_ntd / self.t, axis=1),
                                    tf.nn.softmax(z_ntd / self.t, axis=1))
             fedntd_loss = ce_loss + self.beta * kd_loss
 
         # Compute gradients
-        trainable_vars = self.model.trainable_variables
+        trainable_vars = self.trainable_variables
         gradients = tape.gradient(fedntd_loss, trainable_vars)
         # gradients = tape.gradient(ce_loss, trainable_vars)
         # Update weights
@@ -97,11 +96,16 @@ class FedNTDModel(tf.keras.Model):
         x, y = data
 
         y_pred = self.model(x, training=False)  # Forward pass
-        self.compiled_loss(y, y_pred, regularization_losses=self.model.losses)
+        self.compiled_loss(y, y_pred, regularization_losses=self.losses)
         self.compiled_metrics.update_state(y, y_pred)
         # self.compiled_metrics
         return {m.name: m.result() for m in self.metrics}
 
-    def get_weights(self):
-        return self.model.get_weights()
-
+    # @property
+    # def metrics(self):
+    #     # We list our `Metric` objects here so that `reset_states()` can be
+    #     # called automatically at the start of each epoch
+    #     # or at the start of `evaluate()`.
+    #     # If you don't implement this property, you have to call
+    #     # `reset_states()` yourself at the time of your choosing.
+    #     return [loss_tracker]

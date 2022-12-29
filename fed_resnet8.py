@@ -9,6 +9,7 @@ import numpy as np
 from tensorflow import keras
 # import residual_model as res
 import residual_model_custom as res
+from non_iid_algorithms.FedDynModel import FedDynModel
 from non_iid_algorithms.FedGKDModel import FedGKDModel
 from non_iid_algorithms.FedNTDModel import FedNTDModel
 from non_iid_algorithms.FedProxModel import FedProxModel
@@ -45,6 +46,8 @@ def element_norm_fn_cifar10(image, label):
                                                          np.square(0.2435),
                                                          np.square(0.2616)])
     return norm_layer(tf.cast(image, tf.float32) / 255.0), label
+
+
 # cifar10
 # mean
 # tf.Tensor([0.49139968 0.48215841 0.44653091], shape=(3,), dtype=float64)
@@ -53,7 +56,7 @@ def element_norm_fn_cifar10(image, label):
 # cifar100
 # mean
 # tf.Tensor([0.50707516 0.48654887 0.44091784], shape=(3,), dtype=float64)
-#std
+# std
 # tf.Tensor([0.26733429 0.25643846 0.27615047], shape=(3,), dtype=float64)
 def element_norm_fn_cifar100(element):
     """Utility function to normalize input images."""
@@ -110,7 +113,7 @@ def create_server_optimizer(optimizer="sgd", momentum=0.0, lr=1.0):
     if optimizer == "sgd":
         return keras.optimizers.SGD(learning_rate=lr, momentum=momentum)
     elif optimizer == "adam":
-        return keras.optimizers.Adam(learning_rate=lr)
+        return keras.optimizers.Adam(learning_rate=lr, epsilon=1e-3)
 
 
 # def exp_decayed_learning_rate(initial_learning_rate, decay_rate, step, decay_steps):
@@ -121,9 +124,9 @@ if __name__ == '__main__':
     # Building a dictionary of hyperparameters
     hp = {}
     # hp["algorithm"] = ["fedavg", "fedgkd", "fedprox", "fedntd", "fedmlb"]
-    hp["algorithm"] = ["fedavg"]
+    hp["algorithm"] = ["feddyn"]
     hp["reinit_classifier"] = [False]
-    hp["batch_size"] = [64]
+    hp["batch_size"] = [50]
     hp["E"] = [5]  # local_epochs
     hp["C"] = [5]  # n clients
     hp["total_clients"] = [100]
@@ -140,20 +143,23 @@ if __name__ == '__main__':
     hp["server_momentum"] = [0.0]
     hp["lr_decay"] = [0.998]
     hp["clipnorm"] = [10.0]
+    hp["augm_"] = ["y"]
+    hp["v2_lastdecay_2"] = [50]
 
-    hp["seed"] = [1]  # seed for client selection, model initialization, client data shuffling
+    hp["seed"] = [0]  # seed for client selection, model initialization, client data shuffling
 
     # what can I do then:
 
     # ------------------------------
     # algorithm-specific hyperparameter
     cd = {}
-    cd["fedgkd"] = {"M": [1, 5], "gamma": [0.2]}
+    # cd["fedgkd"] = {"M": [1, 5], "gamma": [0.2]}
     # cd["fedlgic"] = {"lambda1_lambda2_": [[0.7, 0.7], [1.0, 1.0]]}
     # cd["fedlgicd"] = {"lambda1_lambda2_": [[0.1, 0.1], [0.15, 0.15]]}
     # cd["fedprox"] = {"mu": [0.01, 0.001]}
-    # cd["fedntd"] = {"beta": [0.1, 0.05, 1.0]}
-    cd["fedmlb"] = {"lambda1_lambda2_": [[1.0, 1.0]]}
+    cd["feddyn"] = {"alpha_dyn": [0.1]}
+    # cd["fedntd"] = {"beta": [1.0, 0.3]}
+    # cd["fedmlb"] = {"lambda1_lambda2_": [[1.0, 1.0]]}
     # Creating a list of dictionaries
     # each one for a combination of hp + algorithm-specific hyperparams
     settings = logging.get_combinations(hp, cd)
@@ -183,9 +189,9 @@ if __name__ == '__main__':
         server_momentum = setting["server_momentum"]
         exp_decay = setting["lr_decay"]
         num_classes = 10
-        clipnorm = 10.0 # as FedMLB
+        clipnorm = 10.0  # as FedMLB
         tf.keras.utils.set_random_seed(random_seed)
-        tf.config.experimental.enable_op_determinism()
+        # tf.config.experimental.enable_op_determinism()
 
         local_test = False
 
@@ -207,7 +213,7 @@ if __name__ == '__main__':
             loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
             metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')]
         )
-        server_model.summary()
+        server_model.summary(expand_nested=True)
         if algorithm == "fedgkd":
             historical_ensemble_model = create_model(architecture=architecture, num_classes=num_classes, norm=norm,
                                                      seed=random_seed)
@@ -219,6 +225,25 @@ if __name__ == '__main__':
             historical_ensemble_model.set_weights(server_model.get_weights())
             historical_weights = []
             M = setting["M"]
+
+        if algorithm == "feddyn":
+            weight_list = np.asarray([500.0 for i in range(100)])
+            weight_list = weight_list / np.sum(weight_list) * total_clients
+            print("weight list", weight_list)
+            zeros_ww = tf.nest.map_structure(lambda a, b: a - b,
+                                             server_model.get_weights(),
+                                             server_model.get_weights())
+
+            local_param_list = [zeros_ww for i in range(total_clients)]
+
+            init_ww = tf.nest.map_structure(lambda a: a,
+                                            server_model.get_weights())
+
+            clnt_params_list = [init_ww for i in range(total_clients)]
+
+            cld_mdl_param = tf.nest.map_structure(lambda a: a,
+                                                  server_model.get_weights(),
+                                                  )
 
         if dataset == "cifar10":
             (_, _), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
@@ -243,6 +268,7 @@ if __name__ == '__main__':
             local_test_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "local_test"))
 
         global_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "global_test"))
+        global_dyn_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "all_test"))
 
         # historical_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "historical_test"))
 
@@ -265,8 +291,10 @@ if __name__ == '__main__':
             mean_client_loss_lda = 0
             mean_client_accuracy_lda = 0
 
+            # if algorithm != "feddyn" or (algorithm == "feddyn" and rnd == 1):
             aggregated_weights = tf.nest.map_structure(lambda a: a,
                                                        server_model.get_weights())
+
             new_w_global = tf.nest.map_structure(lambda a, b: a - b,
                                                  server_model.get_weights(),
                                                  server_model.get_weights())
@@ -306,9 +334,11 @@ if __name__ == '__main__':
                     alpha=alpha,
                     seed=random_seed)
 
-                resnet_model = create_model(architecture=architecture, num_classes=num_classes, norm=norm,
-                                            l2_weight_decay=l2_weight_decay, seed=random_seed)
-                if algorithm != "feddistill":  # fed_distill does not exchange weights
+                if algorithm != "feddyn":
+                    resnet_model = create_model(architecture=architecture, num_classes=num_classes, norm=norm,
+                                                l2_weight_decay=l2_weight_decay, seed=random_seed)
+
+                if algorithm != "feddistill" and algorithm != "feddyn":  # fed_distill does not exchange weights
                     resnet_model.set_weights(aggregated_weights)
 
                 if algorithm == "fedavg":
@@ -330,23 +360,51 @@ if __name__ == '__main__':
                                          initial_weights=aggregated_weights,
                                          mu=mu)
 
+                if algorithm == "feddyn":
+                    alpha_dyn = setting["alpha_dyn"]
+                    alpha_coef_adpt = alpha_dyn / weight_list[sampled_clients[c]]  # adaptive alpha coef
+
+                    resnet_model = create_model(architecture=architecture, num_classes=num_classes, norm=norm,
+                                                # l2_weight_decay=(alpha_coef_adpt + l2_weight_decay),
+                                                l2_weight_decay=0.0,
+                                                seed=random_seed)
+                    resnet_model.set_weights(aggregated_weights)
+
+                    local_param_list_curr = local_param_list[sampled_clients[c]]
+                    client_model = FedDynModel(resnet_model)
+                    opt = tf.keras.optimizers.experimental.SGD(learning_rate=lr_client, momentum=momentum,
+                                                               clipnorm=clipnorm,
+                                                               weight_decay=(alpha_coef_adpt + l2_weight_decay))
+                    # opt = keras.optimizers.SGD(learning_rate=lr_client, momentum=momentum, clipnorm=clipnorm)
+                    client_model.compile(optimizer=opt,
+                                         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,
+                                                                                            reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE),
+                                         metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
+                                         avg_mdl_param=aggregated_weights,
+                                         local_grad_vector=local_param_list_curr,
+                                         alpha=alpha_coef_adpt)
+
                 if algorithm == "fedgkd":
                     gamma = setting["gamma"]
-                    client_model = FedGKDModel(resnet_model)
+                    client_model = FedGKDModel(resnet_model, historical_ensemble_model)
                     client_model.compile(optimizer=keras.optimizers.SGD(learning_rate=lr_client, momentum=momentum,
                                                                         clipnorm=clipnorm),
                                          loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                                          metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
                                          kd_loss=tf.keras.losses.KLDivergence(),
                                          gamma=gamma)
-                    teacher_logits = historical_ensemble_model.predict(training_dataset)
-                    teacher_logits_ds = tf.data.Dataset.from_tensor_slices(teacher_logits).batch(local_batch_size)
-                    training_dataset = tf.data.Dataset.zip((training_dataset,
-                                                            teacher_logits_ds))
+
+                    # teacher_logits = historical_ensemble_model.predict(training_dataset)
+                    # teacher_logits_2 = historical_ensemble_model.predict(training_dataset)
+                    # print("logits--------")
+                    # print(teacher_logits[0]-teacher_logits_2[0])
+                    # teacher_logits_ds = tf.data.Dataset.from_tensor_slices(teacher_logits).batch(local_batch_size)
+                    # training_dataset = tf.data.Dataset.zip((training_dataset,
+                    #                                         teacher_logits_ds))
 
                 if algorithm == "fedntd":
                     beta = setting["beta"]
-                    client_model = FedNTDModel(resnet_model)
+                    client_model = FedNTDModel(resnet_model, server_model)
                     client_model.compile(optimizer=keras.optimizers.SGD(learning_rate=lr_client, momentum=momentum,
                                                                         clipnorm=clipnorm),
                                          loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
@@ -355,10 +413,10 @@ if __name__ == '__main__':
                                          beta=beta
                                          )
 
-                    teacher_logits = server_model.predict(training_dataset)
-                    teacher_logits_ds = tf.data.Dataset.from_tensor_slices(teacher_logits).batch(local_batch_size)
-                    training_dataset = tf.data.Dataset.zip((training_dataset,
-                                                            teacher_logits_ds))
+                    # teacher_logits = server_model.predict(training_dataset)
+                    # teacher_logits_ds = tf.data.Dataset.from_tensor_slices(teacher_logits).batch(local_batch_size)
+                    # training_dataset = tf.data.Dataset.zip((training_dataset,
+                    #                                         teacher_logits_ds))
 
                 if algorithm == "fedmlb":
                     lambda12 = setting["lambda1_lambda2_"]
@@ -370,15 +428,17 @@ if __name__ == '__main__':
                     server_model_mlb = create_model_mlb(architecture=architecture, num_classes=num_classes, norm=norm,
                                                         l2_weight_decay=0.0, seed=random_seed)
 
-                    local_model_mlb.set_weights(server_model.get_weights())
-                    server_model_mlb.set_weights(server_model.get_weights())
+                    local_model_mlb.set_weights(aggregated_weights)
+                    server_model_mlb.set_weights(aggregated_weights)
 
                     client_model = FedMLB2Model(local_model_mlb, server_model_mlb)
                     client_model.compile(optimizer=keras.optimizers.SGD(learning_rate=lr_client, momentum=momentum,
                                                                         clipnorm=clipnorm),
-                                         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                                         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,
+                                                                                            reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE),
                                          metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
-                                         kd_loss=tf.keras.losses.KLDivergence(),
+                                         kd_loss=tf.keras.losses.KLDivergence(
+                                             reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE),
                                          lambda_1=lambda12[0],
                                          lambda_2=lambda12[1]
                                          )
@@ -427,22 +487,39 @@ if __name__ == '__main__':
                                          )
                     # tf.print("Done..")
 
-
                 history = client_model.fit(
                     training_dataset,
                     batch_size=local_batch_size,
                     epochs=local_epochs,
                 )
+
+                if algorithm == "feddyn":
+                    curr_model_par = tf.nest.map_structure(lambda a: a,
+                                                           client_model.get_weights())
+                    local_param = tf.nest.map_structure(lambda a, b: a - b,
+                                                        curr_model_par,
+                                                        cld_mdl_param,
+                                                        )
+                    print("local_param ", tf.reduce_sum(local_param[0]))
+                    # This could not work
+                    # local_param_list[sampled_clients[c]] += local_param
+                    local_param_list[sampled_clients[c]] = tf.nest.map_structure(lambda a, b: a + b,
+                                                                                 local_param_list[sampled_clients[c]],
+                                                                                 local_param,
+                                                                                 )
+
+                    clnt_params_list[sampled_clients[c]] = curr_model_par
+
                 # log on tensorboard
 
-                client_test_ds = data_utility.load_client_datasets_from_files(
-                    dataset=dataset,
-                    sampled_client=sampled_clients[c],
-                    batch_size=local_batch_size,
-                    alpha=alpha,
-                    split="test")
-
                 if local_test:
+                    client_test_ds = data_utility.load_client_datasets_from_files(
+                        dataset=dataset,
+                        sampled_client=sampled_clients[c],
+                        batch_size=local_batch_size,
+                        alpha=alpha,
+                        split="test")
+
                     loss, accuracy = client_model.evaluate(client_test_ds)
 
                     mean_client_loss_lda = mean_client_loss_lda + loss / k
@@ -455,7 +532,7 @@ if __name__ == '__main__':
 
                     # logging.write_logs("client_local_training_history", history.history, algorithm, client=c)
 
-                if algorithm != "feddistill":
+                if algorithm != "feddistill" and algorithm != "feddyn":
                     # global_weights = tf.nest.map_structure(lambda a, b: a + (local_examples * b) / total_examples,
                     #                                        global_weights,
                     #                                        client_model.model.get_weights() if algorithm not in [
@@ -464,13 +541,11 @@ if __name__ == '__main__':
 
                     # ---- here -----
                     delta_w_local_trainable = tf.nest.map_structure(lambda a, b: a - b,
-                                                                    client_model.model.trainable_weights if algorithm in [
-                                                                        "fedmlb", "fedlgic", "fedlgicd"] else
-                                                                    client_model.trainable_weights,
-                                                                    server_model.trainable_weights,
+                                                                    client_model.get_weights(),
+                                                                    server_model.get_weights(),
                                                                     )
                     delta_w_global_trainable = tf.nest.map_structure(
-                        lambda a, b: a + (local_examples * b) / total_examples,
+                        lambda a, b: a + b * (local_examples / total_examples),
                         delta_w_global_trainable,
                         delta_w_local_trainable)
                     # -------------------
@@ -486,8 +561,9 @@ if __name__ == '__main__':
                     #                                        client_model.get_weights())
 
             # server_model.set_weights(new_w_global)
-            gradients = tf.nest.map_structure(lambda a: -a, delta_w_global_trainable)
-            server_model.optimizer.apply_gradients(zip(gradients, server_model.trainable_variables))
+            if algorithm != "feddyn":
+                gradients = tf.nest.map_structure(lambda a: -a, delta_w_global_trainable)
+                server_model.optimizer.apply_gradients(zip(gradients, server_model.trainable_variables))
             # for i in range(0, len(server_model.non_trainable_weights)):
             #     server_model.non_trainable_weights[i] = new_w_global_non_trainable[i]
 
@@ -510,6 +586,49 @@ if __name__ == '__main__':
 
             # Server evaluation
             # server_model.set_weights(global_weights)
+
+            if algorithm == "feddyn":
+                # average of client model params init
+                avg_mdl_param = tf.nest.map_structure(lambda a, b: a - b,
+                                                      server_model.get_weights(),
+                                                      server_model.get_weights())
+                print("selected clients ", [i for i in sampled_clients])
+                temp = [clnt_params_list[i] for i in sampled_clients]
+                # print("temp len ", len(temp))
+                # print(tf.reduce_sum(temp[0][0]))
+
+                for ww in temp:
+                    avg_mdl_param = tf.nest.map_structure(lambda a, b: a + b / len(temp),
+                                                          avg_mdl_param,
+                                                          ww)
+
+                local_param_avg = tf.nest.map_structure(lambda a, b: a - b,
+                                                        server_model.get_weights(),
+                                                        server_model.get_weights())
+
+                print("local_param_list len ", len(local_param_list))
+                for ww in local_param_list:
+                    local_param_avg = tf.nest.map_structure(lambda a, b: a + b / len(local_param_list),
+                                                            local_param_avg,
+                                                            ww)
+
+                # add this mean
+                cld_mdl_param = tf.nest.map_structure(lambda a, b: a + b,
+                                                      avg_mdl_param,
+                                                      local_param_avg)
+
+                server_model.set_weights(cld_mdl_param)
+                # cld_mdl_param = avg_mdl_param + local_param_avg
+
+                # avg_mdl_param = np.mean(clnt_params_list[selected_clnts], axis=0)
+                # cld_mdl_param = avg_mdl_param + np.mean(local_param_list, axis=0)
+                all_mdl_param = tf.nest.map_structure(lambda a, b: a - b,
+                                                      server_model.get_weights(),
+                                                      server_model.get_weights())
+                for ww in clnt_params_list:
+                    all_mdl_param = tf.nest.map_structure(lambda a, b: a + b / len(clnt_params_list),
+                                                          all_mdl_param,
+                                                          ww)
 
             if algorithm == "fedgkd":
                 # print("fedgkd len ", len(historical_weights))
@@ -548,10 +667,26 @@ if __name__ == '__main__':
                     tf.summary.scalar('accuracy', mean_client_accuracy_lda, step=rnd)
 
             print("[Server] Evaluation - Round: ", rnd)
+            server_model.set_weights(avg_mdl_param)
             history = server_model.evaluate(test_ds, return_dict=True)
             with global_summary_writer.as_default():
                 tf.summary.scalar('loss', tf.squeeze(history["loss"]), step=rnd)
                 tf.summary.scalar('accuracy', tf.squeeze(history["accuracy"]), step=rnd)
+
+            if algorithm == "feddyn":
+                server_model.set_weights(all_mdl_param)
+                history = server_model.evaluate(test_ds, return_dict=True)
+                with global_dyn_summary_writer.as_default():
+                    tf.summary.scalar('loss_all', tf.squeeze(history["loss"]), step=rnd)
+                    tf.summary.scalar('accuracy_all', tf.squeeze(history["accuracy"]), step=rnd)
+
+                server_model.set_weights(cld_mdl_param)
+                history = server_model.evaluate(test_ds, return_dict=True)
+                with global_dyn_summary_writer.as_default():
+                    tf.summary.scalar('loss_cld', tf.squeeze(history["loss"]), step=rnd)
+                    tf.summary.scalar('accuracy_cld', tf.squeeze(history["accuracy"]), step=rnd)
+
+
             # logging.write_logs("server_evaluation", history, algorithm)
             # lr_client = exp_decayed_learning_rate(initial_learning_rate=lr_client_initial, decay_rate=exp_decay,
             #                                       decay_steps=total_rounds, step=rnd)
