@@ -68,8 +68,6 @@ class ResBlock(tf.keras.Model):
 class ResNet18(tf.keras.Model):
     def __init__(self, outputs=10, l2_weight_decay=1e-3, seed: Optional[int] = None):
         super().__init__()
-        tf.print("l2_weight_decay ", l2_weight_decay)
-        print("l2_weight_decay ", l2_weight_decay)
         if seed is not None:
             tf.random.set_seed(seed)
         if tf.keras.backend.image_data_format() == 'channels_last':
@@ -133,6 +131,95 @@ class ResNet18(tf.keras.Model):
 
         return input
 
+
+class ResNet18Moon(tf.keras.Model):
+    def __init__(self, outputs=10, l2_weight_decay=1e-3, seed: Optional[int] = None):
+        super().__init__()
+        if seed is not None:
+            tf.random.set_seed(seed)
+        if tf.keras.backend.image_data_format() == 'channels_last':
+            channel_axis = 3
+        else:
+            channel_axis = 1
+
+        # self.layer0 = tf.keras.Sequential([
+        #     tf.keras.layers.Conv2D(64, kernel_size=(7, 7), strides=(2, 2), padding='same',
+        #                            use_bias=False,
+        #                            kernel_initializer=tf.keras.initializers.HeNormal(seed=seed),
+        #                            kernel_regularizer=tf.keras.regularizers.l2(l2_weight_decay)),
+        self.layer0 = tf.keras.Sequential([
+            tf.keras.layers.Conv2D(64, kernel_size=(3, 3), strides=(1, 1), padding='same',
+                                   use_bias=False,
+                                   kernel_initializer=tf.keras.initializers.HeNormal(seed=seed),
+                                   kernel_regularizer=tf.keras.regularizers.l2(l2_weight_decay)),
+            tfa_norms.GroupNormalization(axis=channel_axis, groups=2, epsilon=GROUP_NORM_EPSILON),
+            tf.keras.layers.ReLU(),
+            # tf.keras.layers.MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding='same'),
+        ], name='layer0')
+
+        self.layer1 = tf.keras.Sequential([
+            ResBlock(64, downsample=False, l2_weight_decay=l2_weight_decay, stride=1),
+            ResBlock(64, downsample=False, l2_weight_decay=l2_weight_decay, stride=1)
+        ], name='layer1')
+
+        self.layer2 = tf.keras.Sequential([
+            ResBlock(128, downsample=True, l2_weight_decay=l2_weight_decay, stride=2),
+            ResBlock(128, downsample=False, l2_weight_decay=l2_weight_decay, stride=1)
+        ], name='layer2')
+
+        self.layer3 = tf.keras.Sequential([
+            ResBlock(256, downsample=True, l2_weight_decay=l2_weight_decay, stride=2),
+            ResBlock(256, downsample=False, l2_weight_decay=l2_weight_decay, stride=1)
+        ], name='layer3')
+
+        self.layer4 = tf.keras.Sequential([
+            ResBlock(512, downsample=True, l2_weight_decay=l2_weight_decay, stride=2),
+            ResBlock(512, downsample=False, l2_weight_decay=l2_weight_decay, stride=1)
+        ], name='layer4')
+
+        self.gap = tf.keras.Sequential([
+            # tfa_norms.GroupNormalization(axis=channel_axis, groups=2, epsilon=GROUP_NORM_EPSILON),
+            # tf.keras.layers.ReLU(),
+            tf.keras.layers.GlobalAveragePooling2D()
+        ], name='gn_relu_gap')
+
+        self.head = tf.keras.Sequential([
+            tf.keras.layers.Dense(256, kernel_initializer=tf.keras.initializers.RandomNormal(
+            stddev=0.01, seed=seed), kernel_regularizer=tf.keras.regularizers.l2(l2_weight_decay),
+                                        bias_regularizer=tf.keras.regularizers.l2(l2_weight_decay)),
+            tf.keras.layers.Dense(256, kernel_initializer=tf.keras.initializers.RandomNormal(
+            stddev=0.01, seed=seed), kernel_regularizer=tf.keras.regularizers.l2(l2_weight_decay),
+                                        bias_regularizer=tf.keras.regularizers.l2(l2_weight_decay))
+        ], name='moon_head')
+
+        self.fc = tf.keras.layers.Dense(outputs, kernel_initializer=tf.keras.initializers.RandomNormal(
+            stddev=0.01, seed=seed), kernel_regularizer=tf.keras.regularizers.l2(l2_weight_decay),
+                                        bias_regularizer=tf.keras.regularizers.l2(l2_weight_decay))
+                                        # use_bias=False)
+
+    def call(self, input, training=True):
+        if training == True:
+            input = self.layer0(input)
+            input = self.layer1(input)
+            input = self.layer2(input)
+            input = self.layer3(input)
+            input = self.layer4(input)
+            features = self.gap(input)
+            # input = self.fc(input)
+            features = self.head(features)
+            output = self.fc(features)
+            return features, output
+        else:
+            input = self.layer0(input)
+            input = self.layer1(input)
+            input = self.layer2(input)
+            input = self.layer3(input)
+            input = self.layer4(input)
+            input = self.gap(input)
+            # input = self.fc(input)
+            input = self.head(input)
+            input = self.fc(input)
+            return input
 
 class ResNet18MLB(tf.keras.Model):
     def __init__(self, outputs=10, l2_weight_decay=1e-3, seed: Optional[int] = None):
@@ -527,6 +614,12 @@ def create_resnet18(num_classes=100, input_shape=(None, 32, 32, 3), norm="group"
 
 def create_resnet18_mlb(num_classes=100, input_shape=(None, 32, 32, 3), norm="group", l2_weight_decay=1e-3, seed: Optional[int] = None):
     resnet18 = ResNet18MLB(outputs=num_classes, l2_weight_decay=l2_weight_decay, seed=seed)
+    resnet18.build((None, 32, 32, 3))
+    return resnet18
+
+
+def create_resnet18_moon(num_classes=100, input_shape=(None, 32, 32, 3), norm="group", l2_weight_decay=1e-3, seed: Optional[int] = None):
+    resnet18 = ResNet18Moon(outputs=num_classes, l2_weight_decay=l2_weight_decay, seed=seed)
     resnet18.build((None, 32, 32, 3))
     return resnet18
 

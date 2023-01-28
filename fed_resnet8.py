@@ -1,5 +1,5 @@
 import os
-
+import shutil
 # This is for explicitly use GPU recognized as device 0
 # Remove this line if you dont need it
 # os.environ['CUDA_VISIBLE_DEVICES'] = "0"
@@ -16,9 +16,13 @@ from non_iid_algorithms.FedProxModel import FedProxModel
 from non_iid_algorithms.FedLGICModel import FedLGICModel
 from non_iid_algorithms.FedLGICDModel import FedLGICDModel
 from non_iid_algorithms.FedMLB2Model import FedMLB2Model
+from non_iid_algorithms.MoonModel import MoonModel
+from non_iid_algorithms.FedDynMLBModel import FedDynMLBModel
+
 import tensorflow_datasets as tfds
 import logging_utility as logging
 from typing import Optional
+import gc
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
@@ -26,7 +30,7 @@ for gpu in gpus:
         device=gpu, enable=True
     )
 
-PATH = os.path.join("determinism_2")
+PATH = os.path.join("determinism_3")
 
 
 def zip_img_and_pred(ds, teacher_pred, batch_size_distill, shuffle_size=1024):
@@ -99,6 +103,13 @@ def create_model_mlb(architecture, num_classes, norm, l2_weight_decay=0.0, seed:
         return res.create_resnet8_mlb(input_shape=(32, 32, 3), num_classes=num_classes, norm=norm,
                                       l2_weight_decay=l2_weight_decay, seed=seed)
 
+def create_model_moon(architecture, num_classes, norm, l2_weight_decay=0.0, seed: Optional[int] = None):
+    if architecture == "resnet18":
+        return res.create_resnet18_moon(input_shape=(32, 32, 3), num_classes=num_classes, norm=norm,
+                                       l2_weight_decay=l2_weight_decay, seed=seed)
+    else:
+        # Not implemented
+        return None
 
 def create_model_lgic(architecture, num_classes, norm, l2_weight_decay=0.0, seed: Optional[int] = None):
     if architecture == "resnet18":
@@ -116,6 +127,40 @@ def create_server_optimizer(optimizer="sgd", momentum=0.0, lr=1.0):
         return keras.optimizers.Adam(learning_rate=lr, epsilon=1e-3)
 
 
+def load_local_param_curr_from_file(client_id, c_list, server_model, algorithm="feddyn", architecture="resnet18", num_classes=100, norm="group", random_seed=None):
+    if algorithm in ["feddyn", "feddynmlb"]:
+        model = create_model(architecture=architecture, num_classes=num_classes, norm=norm,
+                         l2_weight_decay=0.0)
+    else:
+        model = create_model_moon(architecture=architecture, num_classes=num_classes, norm=norm,
+                             l2_weight_decay=0.0, seed=random_seed)
+    path = os.path.join(algorithm + "_checkpoints", "client" + str(client_id), "saved_local_param")
+    if c_list[client_id] != 0:
+        model.load_weights(path)
+        to_return_weights = model.get_weights()
+    else:
+        to_return_weights = tf.nest.map_structure(lambda a, b: a - b,
+                                                  server_model.get_weights(),
+                                                  server_model.get_weights()) if algorithm == "feddyn" else model.get_weights()
+    return to_return_weights
+
+
+def save_local_param_to_file(client_id, local_param, c_list, algorithm="feddyn", architecture="resnet18", num_classes=100, norm="group"):
+    # saving
+    if algorithm in ["feddyn", "feddynmlb"]:
+        model = create_model(architecture=architecture, num_classes=num_classes, norm=norm,
+                         l2_weight_decay=0.0)
+    else:
+        model = create_model_moon(architecture=architecture, num_classes=num_classes, norm=norm,
+                              l2_weight_decay=0.0)
+    model.set_weights(local_param)
+
+    path = os.path.join(algorithm + "_checkpoints", "client" + str(client_id), "saved_local_param")
+    model.save_weights(path)
+
+    c_list[client_id] = 1
+    return
+
 # def exp_decayed_learning_rate(initial_learning_rate, decay_rate, step, decay_steps):
 #     return initial_learning_rate * decay_rate ** (step / decay_steps)
 
@@ -123,10 +168,10 @@ def create_server_optimizer(optimizer="sgd", momentum=0.0, lr=1.0):
 if __name__ == '__main__':
     # Building a dictionary of hyperparameters
     hp = {}
-    # hp["algorithm"] = ["fedavg", "fedgkd", "fedprox", "fedntd", "fedmlb"]
-    hp["algorithm"] = ["feddyn"]
+    hp["algorithm"] = ["feddynmlb"]
+    # hp["algorithm"] = ["moon"]
     hp["reinit_classifier"] = [False]
-    hp["batch_size"] = [50]
+    hp["updates"] = [50]
     hp["E"] = [5]  # local_epochs
     hp["C"] = [5]  # n clients
     hp["total_clients"] = [100]
@@ -144,7 +189,7 @@ if __name__ == '__main__':
     hp["lr_decay"] = [0.998]
     hp["clipnorm"] = [10.0]
     hp["augm_"] = ["y"]
-    hp["v2_lastdecay_2"] = [50]
+    hp["v_pd2"] = [0]
 
     hp["seed"] = [0]  # seed for client selection, model initialization, client data shuffling
 
@@ -153,11 +198,13 @@ if __name__ == '__main__':
     # ------------------------------
     # algorithm-specific hyperparameter
     cd = {}
-    # cd["fedgkd"] = {"M": [1, 5], "gamma": [0.2]}
+    # cd["fedgkd"] = {"M": [5], "gamma": [0.2]}
     # cd["fedlgic"] = {"lambda1_lambda2_": [[0.7, 0.7], [1.0, 1.0]]}
     # cd["fedlgicd"] = {"lambda1_lambda2_": [[0.1, 0.1], [0.15, 0.15]]}
     # cd["fedprox"] = {"mu": [0.01, 0.001]}
-    cd["feddyn"] = {"alpha_dyn": [0.1]}
+    # cd["feddyn"] = {"alpha_dyn": [0.1]}
+    cd["feddynmlb"] = {"alpha_dyn": [0.1], "lambda1_lambda2_": [[1.0, 1.0]]}
+    # cd["moon"] = {"mu_moon": [1.0], "t_moon": [0.5]}
     # cd["fedntd"] = {"beta": [1.0, 0.3]}
     # cd["fedmlb"] = {"lambda1_lambda2_": [[1.0, 1.0]]}
     # Creating a list of dictionaries
@@ -171,7 +218,8 @@ if __name__ == '__main__':
         k = setting["C"]
         total_clients = setting["total_clients"]
         local_epochs = setting["E"]  # local_epochs
-        local_batch_size = setting["batch_size"]
+        # local_batch_size = setting["batch_size"]
+        local_updates = setting["updates"]
         test_batch_size = 256
         reinit_classifier = setting["reinit_classifier"]
         alpha = setting["alpha"]
@@ -192,7 +240,7 @@ if __name__ == '__main__':
         clipnorm = 10.0  # as FedMLB
         tf.keras.utils.set_random_seed(random_seed)
         # tf.config.experimental.enable_op_determinism()
-
+        continuation = True
         local_test = False
 
         if dataset == "cifar100":
@@ -203,7 +251,10 @@ if __name__ == '__main__':
         #                           "average_client_evaluation_after_local_training"], setting, algorithm)
 
         lr_client = lr_client_initial
-        server_model = create_model(architecture=architecture, num_classes=num_classes, norm=norm, seed=random_seed)
+        if algorithm != "moon":
+            server_model = create_model(architecture=architecture, num_classes=num_classes, norm=norm, seed=random_seed)
+        else:
+            server_model = create_model_moon(architecture=architecture, num_classes=num_classes, norm=norm, seed=random_seed)
 
         server_optimizer = create_server_optimizer(optimizer=server_side_optimizer, lr=lr_server,
                                                    momentum=server_momentum)
@@ -226,24 +277,52 @@ if __name__ == '__main__':
             historical_weights = []
             M = setting["M"]
 
-        if algorithm == "feddyn":
+        if algorithm in ["feddyn", "feddynmlb"]:
+            all_clients_model = False
+            client_list = [0 for _ in range(total_clients)]
             weight_list = np.asarray([500.0 for i in range(100)])
             weight_list = weight_list / np.sum(weight_list) * total_clients
-            print("weight list", weight_list)
-            zeros_ww = tf.nest.map_structure(lambda a, b: a - b,
-                                             server_model.get_weights(),
-                                             server_model.get_weights())
-
-            local_param_list = [zeros_ww for i in range(total_clients)]
-
-            init_ww = tf.nest.map_structure(lambda a: a,
-                                            server_model.get_weights())
-
-            clnt_params_list = [init_ww for i in range(total_clients)]
 
             cld_mdl_param = tf.nest.map_structure(lambda a: a,
                                                   server_model.get_weights(),
                                                   )
+            # init
+            if all_clients_model:
+                all_clnt_avg = tf.nest.map_structure(lambda a: a,
+                                                        server_model.get_weights()
+                                                        )
+
+            local_param_avg = tf.nest.map_structure(lambda a, b: a - b,
+                                                    server_model.get_weights(),
+                                                    server_model.get_weights())
+            if continuation:
+                path = os.path.join(algorithm + "_checkpoints", "local_param_avg_model", "local_param_avg")
+                server_model.load_weights(path)
+                local_param_avg = server_model.get_weights()
+
+                path = os.path.join(algorithm + "_checkpoints", "server_model", "saved_local_param")
+                server_model.load_weights(path)
+                cld_mdl_param = tf.nest.map_structure(lambda a: a,
+                                                      server_model.get_weights(),
+                                                      )
+                lr_client = lr_client * (exp_decay ** 500)
+
+            if not continuation:
+                # delete already created checkpoints
+                folder_path = "feddyn_checkpoints"
+                exist = os.path.exists(folder_path)
+                if exist:
+                    shutil.rmtree(folder_path, ignore_errors=True)
+            else:
+                client_list = [1 for _ in range(total_clients)]
+
+        if algorithm == "moon":
+            client_list = [0 for _ in range(total_clients)]
+            folder_path = "moon_checkpoints"
+            exist = os.path.exists(folder_path)
+            if exist:
+                shutil.rmtree(folder_path, ignore_errors=True)
+
 
         if dataset == "cifar10":
             (_, _), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
@@ -268,7 +347,8 @@ if __name__ == '__main__':
             local_test_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "local_test"))
 
         global_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "global_test"))
-        global_dyn_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "all_test"))
+        if algorithm in ["feddyn", "feddynmlb"]  and all_clients_model:
+            global_dyn_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "all_test"))
 
         # historical_summary_writer = tf.summary.create_file_writer(os.path.join(logdir, "historical_test"))
 
@@ -277,7 +357,8 @@ if __name__ == '__main__':
             tf.summary.scalar('loss', tf.squeeze(history["loss"]), step=0)
             tf.summary.scalar('accuracy', tf.squeeze(history["accuracy"]), step=0)
 
-        for rnd in range(1, total_rounds + 1):
+        # for rnd in range(501, total_rounds + 1):
+        for rnd in range(501, total_rounds + 1):
             # cifar10 is partitioned among 20 clients
             list_of_clients = [i for i in range(0, total_clients)]
             sampled_clients = np.random.choice(
@@ -292,27 +373,55 @@ if __name__ == '__main__':
             mean_client_accuracy_lda = 0
 
             # if algorithm != "feddyn" or (algorithm == "feddyn" and rnd == 1):
-            aggregated_weights = tf.nest.map_structure(lambda a: a,
-                                                       server_model.get_weights())
+            if algorithm not in ["feddyn", "feddynmlb"]:
+                aggregated_weights = tf.nest.map_structure(lambda a: a,
+                                                           server_model.get_weights())
 
-            new_w_global = tf.nest.map_structure(lambda a, b: a - b,
-                                                 server_model.get_weights(),
-                                                 server_model.get_weights())
+                new_w_global = tf.nest.map_structure(lambda a, b: a - b,
+                                                     server_model.get_weights(),
+                                                     server_model.get_weights())
 
-            # global_weights = tf.nest.map_structure(lambda a, b: a - b,
-            #                                        global_weights,
-            #                                        global_weights)
+                # global_weights = tf.nest.map_structure(lambda a, b: a - b,
+                #                                        global_weights,
+                #                                        global_weights)
 
-            delta_w_global_trainable = tf.nest.map_structure(lambda a, b: a - b,
-                                                             server_model.trainable_weights,
-                                                             server_model.trainable_weights)
+                delta_w_global_trainable = tf.nest.map_structure(lambda a, b: a - b,
+                                                                 server_model.trainable_weights,
+                                                                 server_model.trainable_weights)
+
+            else:
+                # if rnd == 501:
+                #     path = os.path.join(algorithm + "_checkpoints", "local_param_avg_model", "local_param_avg")
+                #     server_model.load_weights(path)
+                #     local_param_avg = server_model.get_weights()
+                #
+                #     path = os.path.join(algorithm + "_checkpoints", "server_model", "saved_local_param")
+                #     server_model.load_weights(path)
+                #     cld_mdl_param = tf.nest.map_structure(lambda a: a,
+                #                                           server_model.get_weights(),
+                #                                           )
+                #init
+                if all_clients_model:
+                    all_clnt_avg = tf.nest.map_structure(lambda a: a * ((total_clients - k) / total_clients),
+                                                            all_clnt_avg
+                                                            )
+
+                active_clnt_avg = tf.nest.map_structure(lambda a, b: a - b,
+                                                        server_model.get_weights(),
+                                                        server_model.get_weights())
+
+                # this is not equal to the original strategy
+                # local_param_avg = tf.nest.map_structure(lambda a: a * ((total_clients - k) / total_clients),
+                #                                      local_param_avg
+                #                                      )
+
             #
             # w_init_non_trainable = tf.nest.map_structure(lambda a, b: a - b,
             #                                      server_model.non_trainable_weights,
             #                                      server_model.non_trainable_weights)
 
             if algorithm == "feddistill_plus" or algorithm == "feddistill":
-                global_mean_per_label_soft_labels = tf.zeros([10, 10], tf.float32)
+                global_mean_per_label_soft_labels = tf.zeros([num_classes, num_classes], tf.float32)
 
             selected_client_examples = data_utility.load_selected_clients_statistics(sampled_clients, alpha, dataset)
             print("Total examples ", np.sum(selected_client_examples))
@@ -320,12 +429,17 @@ if __name__ == '__main__':
             total_examples = np.sum(selected_client_examples)
 
             for c in range(0, k):
+                # release keras resource
+                # tf.keras.backend.clear_session()
                 print("Client: ", c)
                 local_examples = selected_client_examples[c]
                 print("Local examples: ", local_examples)
 
                 # Local training
                 print(f"[Client {c}] Local Training ---")
+
+                # setting the local_batch_size to perform a total of local_updates
+                local_batch_size = round(local_examples*local_epochs/local_updates)
 
                 training_dataset = data_utility.load_client_datasets_from_files(
                     dataset=dataset,
@@ -334,11 +448,11 @@ if __name__ == '__main__':
                     alpha=alpha,
                     seed=random_seed)
 
-                if algorithm != "feddyn":
+                if algorithm not in ["feddyn", "feddynmlb", "moon"]:
                     resnet_model = create_model(architecture=architecture, num_classes=num_classes, norm=norm,
                                                 l2_weight_decay=l2_weight_decay, seed=random_seed)
 
-                if algorithm != "feddistill" and algorithm != "feddyn":  # fed_distill does not exchange weights
+                if algorithm not in ["feddistill", "feddyn", "feddynmlb", "moon"]:  # fed_distill does not exchange weights
                     resnet_model.set_weights(aggregated_weights)
 
                 if algorithm == "fedavg":
@@ -368,9 +482,10 @@ if __name__ == '__main__':
                                                 # l2_weight_decay=(alpha_coef_adpt + l2_weight_decay),
                                                 l2_weight_decay=0.0,
                                                 seed=random_seed)
-                    resnet_model.set_weights(aggregated_weights)
+                    resnet_model.set_weights(server_model.get_weights())
 
-                    local_param_list_curr = local_param_list[sampled_clients[c]]
+                    local_param_list_curr = load_local_param_curr_from_file(sampled_clients[c], client_list, server_model)
+
                     client_model = FedDynModel(resnet_model)
                     opt = tf.keras.optimizers.experimental.SGD(learning_rate=lr_client, momentum=momentum,
                                                                clipnorm=clipnorm,
@@ -380,9 +495,72 @@ if __name__ == '__main__':
                                          loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,
                                                                                             reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE),
                                          metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
-                                         avg_mdl_param=aggregated_weights,
+                                         avg_mdl_param=server_model.get_weights(),
                                          local_grad_vector=local_param_list_curr,
                                          alpha=alpha_coef_adpt)
+
+                if algorithm == "feddynmlb":
+                    alpha_dyn = setting["alpha_dyn"]
+                    lambda12 = setting["lambda1_lambda2_"]
+
+                    alpha_coef_adpt = alpha_dyn / weight_list[sampled_clients[c]]  # adaptive alpha coef
+                    local_param_list_curr = load_local_param_curr_from_file(sampled_clients[c], client_list, server_model)
+
+                    opt = tf.keras.optimizers.experimental.SGD(learning_rate=lr_client, momentum=momentum,
+                                                               clipnorm=clipnorm,
+                                                               weight_decay=(alpha_coef_adpt + l2_weight_decay))
+
+
+                    local_model_mlb = create_model_mlb(architecture=architecture, num_classes=num_classes, norm=norm,
+                                                       l2_weight_decay=0.0, seed=random_seed)
+
+                    server_model_mlb = create_model_mlb(architecture=architecture, num_classes=num_classes, norm=norm,
+                                                        l2_weight_decay=0.0, seed=random_seed)
+
+                    local_model_mlb.set_weights(server_model.get_weights())
+                    server_model_mlb.set_weights(server_model.get_weights())
+
+                    client_model = FedDynMLBModel(local_model_mlb, server_model_mlb)
+                    client_model.compile(optimizer=opt,
+                                         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,
+                                                                                            reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE),
+                                         metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
+                                         kd_loss=tf.keras.losses.KLDivergence(
+                                             reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE),
+                                         lambda_1=lambda12[0],
+                                         lambda_2=lambda12[1],
+                                         avg_mdl_param=server_model.get_weights(),
+                                         local_grad_vector=local_param_list_curr,
+                                         alpha=alpha_coef_adpt
+                                         )
+
+                if algorithm == "moon":
+                    mu = setting["mu_moon"]
+                    t = setting["t_moon"]
+                    local_model_moon = create_model_moon(architecture=architecture, num_classes=num_classes, norm=norm,
+                                                       l2_weight_decay=l2_weight_decay, seed=random_seed)
+                    local_model_moon.set_weights(server_model.get_weights())
+
+                    server_model_moon = create_model_moon(architecture=architecture, num_classes=num_classes, norm=norm,
+                                                        l2_weight_decay=0.0, seed=random_seed)
+                    server_model_moon.set_weights(server_model.get_weights())
+
+                    last_model_moon = create_model_moon(architecture=architecture, num_classes=num_classes, norm=norm,
+                                                        l2_weight_decay=0.0, seed=random_seed)
+
+                    last_model_moon.set_weights(load_local_param_curr_from_file(client_id=sampled_clients[c],
+                                                                                  c_list=client_list,
+                                                                                  server_model=server_model,
+                                                                                  algorithm="moon",
+                                                                                  random_seed=random_seed))
+
+                    client_model = MoonModel(local_model_moon, global_model=server_model_moon, last_model=last_model_moon)
+                    client_model.compile(optimizer=keras.optimizers.SGD(learning_rate=lr_client, momentum=momentum,
+                                                                        clipnorm=clipnorm),
+                                         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                                         metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name='accuracy')],
+                                         mu=mu,
+                                         temperature=t)
 
                 if algorithm == "fedgkd":
                     gamma = setting["gamma"]
@@ -493,22 +671,67 @@ if __name__ == '__main__':
                     epochs=local_epochs,
                 )
 
-                if algorithm == "feddyn":
-                    curr_model_par = tf.nest.map_structure(lambda a: a,
-                                                           client_model.get_weights())
-                    local_param = tf.nest.map_structure(lambda a, b: a - b,
-                                                        curr_model_par,
-                                                        cld_mdl_param,
-                                                        )
-                    print("local_param ", tf.reduce_sum(local_param[0]))
-                    # This could not work
-                    # local_param_list[sampled_clients[c]] += local_param
-                    local_param_list[sampled_clients[c]] = tf.nest.map_structure(lambda a, b: a + b,
-                                                                                 local_param_list[sampled_clients[c]],
-                                                                                 local_param,
-                                                                                 )
+                if algorithm in ["feddyn", "feddynmlb"]:
+                    # curr_model_par = tf.nest.map_structure(lambda a: a,
+                    #                                        client_model.get_weights())
 
-                    clnt_params_list[sampled_clients[c]] = curr_model_par
+                    # local_param = tf.nest.map_structure(lambda a, b: a - b,
+                    #                                     client_model.get_weights(), # curr_model_par
+                    #                                     cld_mdl_param,
+                    #                                     )
+
+                    local_param_to_save = tf.nest.map_structure(lambda client_ww, cld_ww, ww_curr: ww_curr + client_ww - cld_ww,
+                                                        client_model.get_weights(),  # curr_model_par
+                                                        cld_mdl_param,
+                                                        local_param_list_curr,
+                                                        )
+
+                    # local_param_to_save = tf.nest.map_structure(lambda a, b: a + b,
+                    #                                                              local_param_list_curr,
+                    #                                                              local_param,
+                    #                                                              )
+                    save_local_param_to_file(sampled_clients[c], local_param_to_save, client_list)
+
+                    # -----------------
+                    # clnt_params_list[sampled_clients[c]] = curr_model_par
+                    active_clnt_avg = tf.nest.map_structure(lambda a, b: a + b / k,
+                                                        active_clnt_avg,
+                                                        client_model.get_weights(), # curr_model_par
+                                                        )
+                    if all_clients_model:
+                        all_clnt_avg = tf.nest.map_structure(lambda a, b: a + b / total_clients,
+                                                            all_clnt_avg,
+                                                            client_model.get_weights(), # curr_model_par
+                                                            )
+                    # local_param_avg = tf.nest.map_structure(lambda a, b: a + b / total_clients,
+                    #                                     local_param_avg,
+                    #                                     local_param_to_save,
+                    #                                     )
+                    # computing average efficiently
+                    local_param_avg = tf.nest.map_structure(lambda average, old_value, new_value: average - old_value / total_clients + new_value / total_clients,
+                                                            local_param_avg,
+                                                            local_param_list_curr,
+                                                            local_param_to_save
+                                                            )
+
+
+                    # ---------- clear memory -----------------
+                    def reset_tensorflow_keras_backend():
+                        # to be further investigated, but this seems to be enough
+                        tf.keras.backend.clear_session()
+                        # tf.reset_default_graph()
+                        _ = gc.collect()
+                        return
+
+
+                    reset_tensorflow_keras_backend()
+                    del client_model
+                    # del resnet_model
+                    del opt
+
+                if algorithm == "moon":
+                    save_local_param_to_file(client_id=sampled_clients[c], local_param=client_model.get_weights(),
+                                             c_list=client_list, algorithm="moon")
 
                 # log on tensorboard
 
@@ -532,7 +755,7 @@ if __name__ == '__main__':
 
                     # logging.write_logs("client_local_training_history", history.history, algorithm, client=c)
 
-                if algorithm != "feddistill" and algorithm != "feddyn":
+                if algorithm not in ["feddistill", "feddyn", "moon", "feddynmlb"]:
                     # global_weights = tf.nest.map_structure(lambda a, b: a + (local_examples * b) / total_examples,
                     #                                        global_weights,
                     #                                        client_model.model.get_weights() if algorithm not in [
@@ -548,6 +771,7 @@ if __name__ == '__main__':
                         lambda a, b: a + b * (local_examples / total_examples),
                         delta_w_global_trainable,
                         delta_w_local_trainable)
+
                     # -------------------
                     #
                     # # Non trainable params
@@ -560,8 +784,9 @@ if __name__ == '__main__':
                     #                                        new_w_global,
                     #                                        client_model.get_weights())
 
+
             # server_model.set_weights(new_w_global)
-            if algorithm != "feddyn":
+            if algorithm not in ["feddyn", "feddynmlb"]:
                 gradients = tf.nest.map_structure(lambda a: -a, delta_w_global_trainable)
                 server_model.optimizer.apply_gradients(zip(gradients, server_model.trainable_variables))
             # for i in range(0, len(server_model.non_trainable_weights)):
@@ -587,34 +812,35 @@ if __name__ == '__main__':
             # Server evaluation
             # server_model.set_weights(global_weights)
 
-            if algorithm == "feddyn":
+            if algorithm in ["feddyn", "feddynmlb"]:
                 # average of client model params init
-                avg_mdl_param = tf.nest.map_structure(lambda a, b: a - b,
-                                                      server_model.get_weights(),
-                                                      server_model.get_weights())
-                print("selected clients ", [i for i in sampled_clients])
-                temp = [clnt_params_list[i] for i in sampled_clients]
-                # print("temp len ", len(temp))
-                # print(tf.reduce_sum(temp[0][0]))
+                # avg_mdl_param = tf.nest.map_structure(lambda a, b: a - b,
+                #                                       server_model.get_weights(),
+                #                                       server_model.get_weights())
+                # print("selected clients ", [i for i in sampled_clients])
+                # temp = [clnt_params_list[i] for i in sampled_clients]
+                # # print("temp len ", len(temp))
+                # # print(tf.reduce_sum(temp[0][0]))
+                #
+                # for ww in temp:
+                #     avg_mdl_param = tf.nest.map_structure(lambda a, b: a + b / len(temp),
+                #                                           avg_mdl_param,
+                #                                           ww)
 
-                for ww in temp:
-                    avg_mdl_param = tf.nest.map_structure(lambda a, b: a + b / len(temp),
-                                                          avg_mdl_param,
-                                                          ww)
-
-                local_param_avg = tf.nest.map_structure(lambda a, b: a - b,
-                                                        server_model.get_weights(),
-                                                        server_model.get_weights())
-
-                print("local_param_list len ", len(local_param_list))
-                for ww in local_param_list:
-                    local_param_avg = tf.nest.map_structure(lambda a, b: a + b / len(local_param_list),
-                                                            local_param_avg,
-                                                            ww)
+                # here modified
+                # local_param_avg = tf.nest.map_structure(lambda a, b: a - b,
+                #                                         server_model.get_weights(),
+                #                                         server_model.get_weights())
+                #
+                # for ww in local_param_list:
+                #     local_param_avg = tf.nest.map_structure(lambda a, b: a + b / total_clients,
+                #                                             local_param_avg,
+                #                                             ww)
+                # -------------
 
                 # add this mean
                 cld_mdl_param = tf.nest.map_structure(lambda a, b: a + b,
-                                                      avg_mdl_param,
+                                                      active_clnt_avg,
                                                       local_param_avg)
 
                 server_model.set_weights(cld_mdl_param)
@@ -622,13 +848,21 @@ if __name__ == '__main__':
 
                 # avg_mdl_param = np.mean(clnt_params_list[selected_clnts], axis=0)
                 # cld_mdl_param = avg_mdl_param + np.mean(local_param_list, axis=0)
-                all_mdl_param = tf.nest.map_structure(lambda a, b: a - b,
-                                                      server_model.get_weights(),
-                                                      server_model.get_weights())
-                for ww in clnt_params_list:
-                    all_mdl_param = tf.nest.map_structure(lambda a, b: a + b / len(clnt_params_list),
-                                                          all_mdl_param,
-                                                          ww)
+                # all_mdl_param = tf.nest.map_structure(lambda a, b: a - b,
+                #                                       server_model.get_weights(),
+                #                                       server_model.get_weights())
+                # for ww in clnt_params_list:
+                #     all_mdl_param = tf.nest.map_structure(lambda a, b: a + b / len(clnt_params_list),
+                #                                           all_mdl_param,
+                #                                           ww)
+
+                if rnd == 500:
+                    path = os.path.join(algorithm + "_checkpoints", "server_model", "saved_local_param")
+                    server_model.save_weights(path)
+                    path = os.path.join(algorithm + "_checkpoints", "local_param_avg_model", "local_param_avg")
+                    server_model.set_weights(local_param_avg)
+                    server_model.save_weights(path)
+
 
             if algorithm == "fedgkd":
                 # print("fedgkd len ", len(historical_weights))
@@ -667,27 +901,30 @@ if __name__ == '__main__':
                     tf.summary.scalar('accuracy', mean_client_accuracy_lda, step=rnd)
 
             print("[Server] Evaluation - Round: ", rnd)
-            server_model.set_weights(avg_mdl_param)
+            if algorithm in ["feddyn", "feddynmlb"]:
+                server_model.set_weights(active_clnt_avg)
             history = server_model.evaluate(test_ds, return_dict=True)
             with global_summary_writer.as_default():
                 tf.summary.scalar('loss', tf.squeeze(history["loss"]), step=rnd)
                 tf.summary.scalar('accuracy', tf.squeeze(history["accuracy"]), step=rnd)
 
-            if algorithm == "feddyn":
-                server_model.set_weights(all_mdl_param)
-                history = server_model.evaluate(test_ds, return_dict=True)
-                with global_dyn_summary_writer.as_default():
-                    tf.summary.scalar('loss_all', tf.squeeze(history["loss"]), step=rnd)
-                    tf.summary.scalar('accuracy_all', tf.squeeze(history["accuracy"]), step=rnd)
+            if algorithm in ["feddyn", "feddynmlb"]:
+                if all_clients_model:
+                    server_model.set_weights(all_clnt_avg)
+                    history = server_model.evaluate(test_ds, return_dict=True)
+                    with global_dyn_summary_writer.as_default():
+                        tf.summary.scalar('loss_all', tf.squeeze(history["loss"]), step=rnd)
+                        tf.summary.scalar('accuracy_all', tf.squeeze(history["accuracy"]), step=rnd)
 
                 server_model.set_weights(cld_mdl_param)
-                history = server_model.evaluate(test_ds, return_dict=True)
-                with global_dyn_summary_writer.as_default():
-                    tf.summary.scalar('loss_cld', tf.squeeze(history["loss"]), step=rnd)
-                    tf.summary.scalar('accuracy_cld', tf.squeeze(history["accuracy"]), step=rnd)
+                # history = server_model.evaluate(test_ds, return_dict=True)
+                # with global_summary_writer.as_default():
+                #     tf.summary.scalar('loss_cld', tf.squeeze(history["loss"]), step=rnd)
+                #     tf.summary.scalar('accuracy_cld', tf.squeeze(history["accuracy"]), step=rnd)
 
 
             # logging.write_logs("server_evaluation", history, algorithm)
             # lr_client = exp_decayed_learning_rate(initial_learning_rate=lr_client_initial, decay_rate=exp_decay,
             #                                       decay_steps=total_rounds, step=rnd)
             lr_client *= exp_decay
+

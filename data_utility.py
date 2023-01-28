@@ -15,7 +15,12 @@ def remove_list_from_list(orig_list, to_remove):
     return new_list
 
 def load_selected_clients_statistics(selected_clients, alpha, dataset):
-    path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+    if alpha == 0.3:
+        path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+    else:
+        path = os.path.join(dataset+"_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+
+    # path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
     smpls_loaded = np.load(path)
     # print(smpls_loaded[selected_clients])
     local_examples_all_clients = np.sum(smpls_loaded, axis=1)
@@ -126,7 +131,10 @@ def load_client_datasets_from_files(dataset, sampled_client, batch_size, alpha=1
     # ----------------------------------------
 
     # path = os.path.join(dataset+"_dirichlet", str(round(alpha, 2)), split)
-    path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), split)
+    if alpha == 0.3:
+        path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), split)
+    else:
+        path = os.path.join(dataset+"_dirichlet_train_and_test", str(round(alpha, 2)), split)
 
     loaded_ds = tf.data.experimental.load(
         path=os.path.join(path, str(sampled_client)), element_spec=None, compression=None, reader_func=None
