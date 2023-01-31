@@ -1,4 +1,4 @@
-## Federated Learning Algorithms with Heterogeneous Data Distributions: An Empirical Evaluation
+# Federated Learning Algorithms with Heterogeneous Data Distributions
 
 This repository contains TensorFlow codes to simulate different FL algorithms to limit the degradation introduced by 
 non-IID data distributions. 
@@ -24,7 +24,7 @@ Default values.
 - For FedAdam we set $\tau$ (a constant for numerical stability) equal to 0.001 as in \cite{kim2022multi, reddi2020adaptive}.
 - For FedDyn we set $\alpha$ equal to 0.1 as in the original paper.
 
-# Dataset and Model Architecture 
+## Dataset and Model Architecture 
 [cifar100](https://www.tensorflow.org/datasets/catalog/cifar100) and ResNet-18.
 
 ### Data partitioning
@@ -72,7 +72,7 @@ If possible, the `dirichlet_partition.py` will create disjoint dataset for clien
 
 #### Logging
 
-The `simulation.py` produces logging txt files with per-round metrics. It also creates tensorboard logging files with global model accuracy.
+The `fed_resnet8.py` produces tensorboard logging files with global model test accuracy.
 
 
 
