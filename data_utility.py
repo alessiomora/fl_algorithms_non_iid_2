@@ -27,6 +27,19 @@ def load_selected_clients_statistics(selected_clients, alpha, dataset):
     # print(local_examples_all_clients)
     return local_examples_all_clients[selected_clients.tolist()]
 
+def load_all_clients_statistics(alpha, dataset):
+    if alpha == 0.3:
+        path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+    else:
+        path = os.path.join(dataset+"_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+
+    # path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+    smpls_loaded = np.load(path)
+    # print(smpls_loaded[selected_clients])
+    local_examples_all_clients = np.sum(smpls_loaded, axis=1)
+    # print(local_examples_all_clients)
+    return local_examples_all_clients.tolist()
+
 def load_stl10_dataset_from_files(num_examples, seed=None):
     """Loads the stl10 dataset from file. Then take the first num_examples examples
     and return them in a batched dataset."""

@@ -42,7 +42,7 @@ for d in dirs:
                         yticklabels=10,
                         # xticklabels=10,
                         )
-    g.set_title("α = " + d, fontsize=16)
+    # g.set_title("α = " + d, fontsize=16, pad=20))
     g.set_ylabel('Label', fontsize=16)
     g.set_xlabel('Client', fontsize=16)
     if heatmap == 'sattler':
@@ -59,8 +59,14 @@ for d in dirs:
         g.set_yticks(tick_pos)
         g.set_yticklabels(reversed([1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]))
         # plt.yticks([i for i in reversed(range(0, num_clients + 1, round(num_clients / 10.0)))])
-        plt.legend(bbox_to_anchor=(1.25, 1.0), borderaxespad=0)
+        # plt.legend(bbox_to_anchor=(1.25, 1.0), borderaxespad=0)
+        # sns.move_legend(g, "upper left", bbox_to_anchor=(1, 1), title="Number of examples", title_fontsize=11, labelspacing=0.9, borderaxespad=0.8)
+        sns.move_legend(
+            g, "lower center",
+            bbox_to_anchor=(.5, 1), ncol=6, title=None, frameon=False,
+        )
         sns.despine(top=True, right=True, left=True, bottom=True)
+        g.set_title("α = " + d, fontsize=16, pad=40)
         # g.get_legend().remove()
     else:
         xmin, xmax = g.get_xlim()
@@ -74,6 +80,7 @@ for d in dirs:
         tick_labels = [h*10 for h in range(len(tick_pos))]
         g.set_yticks(tick_pos)
         g.set_yticklabels(tick_labels, rotation=0)
+        g.set_title("α = " + d, fontsize=16, )
 
     plt.show()
     g.get_figure().savefig(os.path.join(chart_folder, 'distrib_' + d + '_' +heatmap+'.pdf'), format='pdf', bbox_inches='tight')
