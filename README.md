@@ -90,5 +90,35 @@ If possible, the `dirichlet_partition.py` will create disjoint dataset for clien
 
 The `fed_resnet8.py` produces tensorboard logging files with global model test accuracy.
 
+[1] T. Li, A. K. Sahu, M. Zaheer, M. Sanjabi, A. Talwalkar, and V. Smith. “Federated
+optimization in heterogeneous networks”. arXiv preprint arXiv:1812.06127,
+2018.
 
+[2] D. Yao, W. Pan, Y. Dai, Y. Wan, X. Ding, H. Jin, Z. Xu, and L. Sun. “Local-
+Global Knowledge Distillation in Heterogeneous Federated Learning with Non-
+IID Data”. arXiv preprint arXiv:2107.00051, 2021.
+
+[3] G. Lee,M.Jeong,Y. Shin, S. Bae, and S.-Y. Yun. “Preservation of the GlobalKnowledge
+by Not-True Distillation in Federated Learning”. In: Advances in Neural Information
+Processing Systems. 2022.
+
+[4] J. Kim, G. Kim, and B. Han. “Multi-Level Branched Regularization for Federated
+Learning”. In: International Conference onMachine Learning.PMLR.2022, pp. 11058–
+11073.
+
+[5] D. A. E. Acar, Y. Zhao, R. M. Navarro, M. Mattina, P. N. Whatmough, and V.
+Saligrama. “Federated learning based on dynamic regularization”. arXiv preprint
+arXiv:2111.04263, 2021.
+
+[6] Q. Li, B. He, andD. Song.“Model-contrastive federated learning”. In: Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. 2021,
+pp. 10713–10722.
+
+[7] T.-M. H. Hsu, H. Qi, and M. Brown.“Measuring the effects of non-identical data
+distribution for federated visual classification”. arXiv preprint arXiv:1909.06335,
+2019.
+
+[8] S. Reddi, Z. Charles,M. Zaheer, Z. Garrett, K. Rush, J. Konečny` , S. Kumar, and
+H. B.McMahan. “Adaptive Federated Optimization”. arXiv preprint arXiv:2003.00295,
+2020.
 
