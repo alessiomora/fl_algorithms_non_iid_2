@@ -5,23 +5,39 @@ non-IID data distributions.
 
 ## Algorithms
 List of implemented algorithms in this repo:
-- FedProx
-- FedGKD
-- FedNTD
-- FedMLB
-- FedDyn
-- MOON
-- FedAvgM
-- FedAdam
-- FedAvgM
+- FedAvg [0]
+- FedProx [1]
+- FedGKD [2]
+- FedNTD [3]
+- FedMLB [4]
+- FedDyn [5]
+- MOON [6]
+- FedAvgM [7]
+- FedAdam [8]
 
-Default values.
-- For FedProx we tuned $\mu$ in $\{0.01, 0.001\}$. $\mu$ controls the weight of the proximal term in the local objective function.
+Default hyperparameters.
+
+Similar to [4, 5], in all the experiments, SGD with learning rate fixed to 0.1 is used as local
+optimizer, and the global learning rate is set to 1.0, except for FedAdam which used 0.01
+for both local and global learning rate. Local epochs are fixed to 5 and a random fraction
+of 0.05 (5 %) clients is selected per round.Weight decay with a factor of 0.001 is applied to
+avoid local overfitting. Local epochs are fixed to 5. Local batch size is determined so that
+each client performs 50 local updates. Gradient clipping is performed to stabilize local
+training. Local learning rate is exponentially decayed with a factor of 0.998 similar to the
+work in [4, 5]. The model architecture used in our experiments is ResNet-18, but
+replacing the batch normalization layer with group normalization. We
+used random rotation, horizontal flip and random crop as preprocessing layers. For fair
+comparison, seeds are used to select random client at each round, to perform local data
+preprocessing, and to initialize client models.
+
+Algorithm-specific hyperparameters.
+- For FedProx we tuned $\mu$ in {0.01, 0.001. $\mu$ controls the weight of the proximal term in the local objective function.
 - For FedGKD we set $\gamma$ to 0.2, as in the original paper. $\gamma$ controls the weight of the  KD-based term in the local objective function.
-- For FedNTD we selected $\lambda$ in $\{0.3, 1.0\}$.
-- For FedMLB $\lambda_1$ and $\lambda_2$ are both set to 1 ($\lambda_1$, $\lambda_2$ weight the impact of the hybrid cross-entropy loss and the KD-based loss, see Fig. \ref{fig:fedmlb}). 5 blocks are considered, formed as in the original paper, where conv1, conv2\_x, conv3\_x, conv4\_x, conv5\_x and the fully connected layer constitutes a single block. 
-- For FedAvgM we selected the momentum parameter among $\{ 0.4, 0.6, 0.8, 0.9\}$.
-- For FedAdam we set $\tau$ (a constant for numerical stability) equal to 0.001 as in \cite{kim2022multi, reddi2020adaptive}.
+- For FedNTD we selected $\lambda$ in {0.3, 1.0}.
+- For FedMLB $\lambda_1$ and $\lambda_2$ are both set to 1. $\lambda_1$ and $\lambda_2$ weight the impact of the hybrid cross-entropy loss and the KD-based loss. 
+  5 blocks are considered, formed as in the original paper, where conv1, conv2\_x, conv3\_x, conv4\_x, conv5\_x and the fully connected layer constitutes a single block. 
+- For FedAvgM we selected the momentum parameter among {0.4, 0.6, 0.8, 0.9}.
+- For FedAdam we set $\tau$ (a constant for numerical stability) equal to 0.001.
 - For FedDyn we set $\alpha$ equal to 0.1 as in the original paper.
 
 ## Dataset and Model Architecture 
