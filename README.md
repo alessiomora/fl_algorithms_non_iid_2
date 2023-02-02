@@ -90,6 +90,8 @@ If possible, the `dirichlet_partition.py` will create disjoint dataset for clien
 
 The `fed_resnet8.py` produces tensorboard logging files with global model test accuracy.
 
+### References 
+
 [1] T. Li, A. K. Sahu, M. Zaheer, M. Sanjabi, A. Talwalkar, and V. Smith. “Federated
 optimization in heterogeneous networks”. arXiv preprint arXiv:1812.06127,
 2018.
