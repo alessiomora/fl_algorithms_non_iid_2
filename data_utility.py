@@ -14,6 +14,33 @@ def remove_list_from_list(orig_list, to_remove):
             new_list.append(element)
     return new_list
 
+def load_probability_occurrence_class(selected_clients, alpha, dataset):
+    if alpha == 0.3:
+        path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+    else:
+        path = os.path.join(dataset+"_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+
+    smpls_loaded = np.load(path)
+    # print(smpls_loaded)
+    local_examples_all_clients = np.sum(smpls_loaded, axis=1)
+    # print(local_examples_all_clients)
+    local_examples_all_clients = np.repeat(local_examples_all_clients, np.shape(smpls_loaded)[1]).reshape(
+        np.shape(smpls_loaded))
+
+    # print(local_examples_all_clients)
+
+    local_prob = smpls_loaded / local_examples_all_clients
+    return local_prob[selected_clients.tolist()]
+
+def load_class_occurrence(selected_clients, alpha, dataset):
+    if alpha == 0.3:
+        path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+    else:
+        path = os.path.join(dataset+"_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
+
+    smpls_loaded = np.load(path)
+    return smpls_loaded[selected_clients.tolist()]
+
 def load_selected_clients_statistics(selected_clients, alpha, dataset):
     if alpha == 0.3:
         path = os.path.join(dataset+"_mlb_dirichlet_train_and_test", str(round(alpha, 2)), "distribution_train.npy")
@@ -149,7 +176,8 @@ def load_client_datasets_from_files(dataset, sampled_client, batch_size, alpha=1
     else:
         path = os.path.join(dataset+"_dirichlet_train_and_test", str(round(alpha, 2)), split)
 
-    loaded_ds = tf.data.experimental.load(
+    # loaded_ds = tf.data.experimental.load(
+    loaded_ds = tf.data.Dataset.load(
         path=os.path.join(path, str(sampled_client)), element_spec=None, compression=None, reader_func=None
     )
 
