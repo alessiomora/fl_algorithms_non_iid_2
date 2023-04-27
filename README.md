@@ -16,6 +16,8 @@ List of implemented algorithms in this repo:
 - FedAdam [8]
 - FedSAM [9]
 - FedFA [10]
+- FedMAX [11]
+- FedLC/DMFL [12, 13]
 
 Default hyperparameters.
 
@@ -129,4 +131,18 @@ October 23–27, 2022, Proceedings, Part XXIII, Springer. pp. 654–
 672.
 
 [10] Zhou, T., Konukoglu, E., 2023. Fedfa: Federated feature augmentation.
-arXiv preprint arXiv:2301.12995 .
+arXiv preprint arXiv:2301.12995.
+
+[11] W. Chen, K. Bhardwaj, and R. Marculescu, “Fedmax: Mitigating
+Activation Divergence for Accurate and Communication-efficient
+Federated Learning,” in Proc. of Machine Learning and Knowledge
+Discovery in Databases: European Conference. Springer, 2021, pp.
+348–363.
+
+[12] J. Zhang, Z. Li, B. Li, J. Xu, S. Wu, S. Ding, and C. Wu, “Federated
+Learning with Label Distribution Skew via Logits Calibration,” in Proc. of International Conference on Machine Learning. PMLR,
+2022, pp. 26 311–26 329.
+
+[13] X. Ran, L. Ge, and L. Zhong, “Dynamic margin for federated learning
+with imbalanced data,” in 2021 International Joint Conference on
+Neural Networks (IJCNN). IEEE, 2021, pp. 1–8
