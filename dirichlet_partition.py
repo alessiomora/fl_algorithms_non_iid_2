@@ -1,4 +1,4 @@
-""" This script partions the CIFAR10 dataset in a federated fashion.
+""" This script partions the CIFAR10/CIFAR100 dataset in a federated fashion.
 The level of non-iidness is defined via the alpha parameter (alpha in the paper below as well)
 for a dirichlet distribution, and rules the distribution of examples per label on clients.
 This implementation is based on the paper: https://arxiv.org/abs/1909.06335
@@ -44,7 +44,7 @@ def remove_list_from_list(orig_list, to_remove):
 
 if __name__ == '__main__':
     alphas = [0.3] # alpha >= 100.0 generates a homogeneous distrib.
-    datasets = ["cifar10"] # dataset = ["cifar10", "cifar100"]
+    datasets = ["cifar100"] # dataset = ["cifar10", "cifar100"]
     num_of_clients = 100
 
     print("Generating dirichlet partitions..")
